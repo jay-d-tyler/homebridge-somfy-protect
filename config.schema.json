@@ -2,8 +2,8 @@
   "pluginAlias": "SomfyProtect",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Modern Homebridge plugin for Somfy Protect home security systems. For help and documentation please see the [GitHub repository](https://github.com/yourusername/homebridge-somfy-protect).",
-  "footerDisplay": "If you have multiple sites, check your Homebridge logs to find the site IDs.",
+  "headerDisplay": "Modern Homebridge plugin for Somfy Protect home security systems. For help and documentation please see the [GitHub repository](https://github.com/jay-d-tyler/homebridge-somfy-protect).",
+  "footerDisplay": "💡 **Tip:** After saving, check your Homebridge logs to see detected sites. If you have multiple sites, copy the site ID and add it to Advanced Settings.",
   "schema": {
     "type": "object",
     "required": ["username", "password"],
@@ -15,33 +15,42 @@
         "description": "The name that will appear in your Homebridge log."
       },
       "username": {
-        "title": "Username",
+        "title": "Email Address",
         "type": "string",
         "required": true,
         "format": "email",
         "placeholder": "your.email@example.com",
-        "description": "Your Somfy Protect account email address"
+        "description": "Your Somfy Protect account email (same as Somfy mobile app)"
       },
       "password": {
         "title": "Password",
         "type": "string",
         "required": true,
-        "placeholder": "your-password",
-        "description": "Your Somfy Protect account password"
+        "placeholder": "Enter your password",
+        "description": "Your Somfy Protect account password",
+        "x-schema-form": {
+          "type": "password"
+        }
       },
       "siteId": {
-        "title": "Site ID (Optional)",
+        "title": "Site ID",
         "type": "string",
-        "placeholder": "Leave blank for default site",
-        "description": "If you have multiple sites, specify which site to use. Check logs to find site IDs."
+        "placeholder": "Leave blank to auto-detect",
+        "description": "🏠 For multiple Somfy Protect sites: After saving, check logs to see all detected sites with their IDs. Copy the site ID you want to use and paste it here.",
+        "condition": {
+          "functionBody": "return model.username && model.password;"
+        }
       },
       "pollingInterval": {
-        "title": "Polling Interval (ms)",
+        "title": "Status Check Interval",
         "type": "integer",
         "default": 10000,
         "minimum": 5000,
         "maximum": 60000,
-        "description": "How often to check for status updates (milliseconds). Default is 10000 (10 seconds)."
+        "description": "⏱️ How often to check alarm status in milliseconds. Default: 10000 (10 seconds). Lower values = faster updates but more API calls.",
+        "x-schema-form": {
+          "suffix": "ms"
+        }
       },
       "debug": {
         "title": "Debug Logging",
