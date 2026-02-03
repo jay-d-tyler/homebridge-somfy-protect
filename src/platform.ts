@@ -108,7 +108,7 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
       } else {
         sitesToRegister = sites;
         if (sites.length > 1) {
-          this.log.warn(`Multiple sites detected. Add "siteId" to config to select a specific site:`);
+          this.log.warn('Multiple sites detected. Add "siteId" to config to select a specific site:');
           sites.forEach(s => this.log.warn(`  - ${s.label}: ${s.site_id}`));
         }
       }

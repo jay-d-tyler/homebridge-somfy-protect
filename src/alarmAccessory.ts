@@ -78,15 +78,15 @@ export class SomfyProtectAlarmAccessory {
    */
   private somfyToHomekitCurrentState(level: SecurityLevel): CharacteristicValue {
     switch (level) {
-      case 'armed':
-        return this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM;
-      case 'partial':
-        return this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
-      case 'disarmed':
-        return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
-      default:
-        this.platform.log.warn(`Unknown security level: ${level}`);
-        return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
+    case 'armed':
+      return this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM;
+    case 'partial':
+      return this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
+    case 'disarmed':
+      return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
+    default:
+      this.platform.log.warn(`Unknown security level: ${level}`);
+      return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
     }
   }
 
@@ -95,15 +95,15 @@ export class SomfyProtectAlarmAccessory {
    */
   private somfyToHomekitTargetState(level: SecurityLevel): CharacteristicValue {
     switch (level) {
-      case 'armed':
-        return this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
-      case 'partial':
-        return this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM;
-      case 'disarmed':
-        return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
-      default:
-        this.platform.log.warn(`Unknown security level: ${level}`);
-        return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
+    case 'armed':
+      return this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
+    case 'partial':
+      return this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM;
+    case 'disarmed':
+      return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
+    default:
+      this.platform.log.warn(`Unknown security level: ${level}`);
+      return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
     }
   }
 
@@ -112,15 +112,15 @@ export class SomfyProtectAlarmAccessory {
    */
   private homekitToSomfyLevel(state: CharacteristicValue): SecurityLevel {
     switch (state) {
-      case this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM:
-        return 'armed';
-      case this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM:
-        return 'partial';
-      case this.platform.Characteristic.SecuritySystemTargetState.DISARM:
-        return 'disarmed';
-      default:
-        this.platform.log.warn(`Unknown target state: ${state}`);
-        return 'disarmed';
+    case this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM:
+      return 'armed';
+    case this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM:
+      return 'partial';
+    case this.platform.Characteristic.SecuritySystemTargetState.DISARM:
+      return 'disarmed';
+    default:
+      this.platform.log.warn(`Unknown target state: ${state}`);
+      return 'disarmed';
     }
   }
 
