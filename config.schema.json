@@ -1,18 +1,78 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "SomfyProtect",
   "pluginType": "platform",
   "singular": true,
-  "strictValidation": false,
+  "headerDisplay": "Modern Homebridge plugin for Somfy Protect home security systems. For help and documentation please see the [GitHub repository](https://github.com/yourusername/homebridge-somfy-protect).",
+  "footerDisplay": "If you have multiple sites, check your Homebridge logs to find the site IDs.",
   "schema": {
     "type": "object",
-    "required": ["name"],
-    "additionalProperties": false,
+    "required": ["username", "password"],
     "properties": {
       "name": {
         "title": "Name",
         "type": "string",
-        "default": "Example Dynamic Platform"
+        "default": "Somfy Protect",
+        "description": "The name that will appear in your Homebridge log."
+      },
+      "username": {
+        "title": "Username",
+        "type": "string",
+        "required": true,
+        "format": "email",
+        "placeholder": "your.email@example.com",
+        "description": "Your Somfy Protect account email address"
+      },
+      "password": {
+        "title": "Password",
+        "type": "string",
+        "required": true,
+        "placeholder": "your-password",
+        "description": "Your Somfy Protect account password"
+      },
+      "siteId": {
+        "title": "Site ID (Optional)",
+        "type": "string",
+        "placeholder": "Leave blank for default site",
+        "description": "If you have multiple sites, specify which site to use. Check logs to find site IDs."
+      },
+      "pollingInterval": {
+        "title": "Polling Interval (ms)",
+        "type": "integer",
+        "default": 10000,
+        "minimum": 5000,
+        "maximum": 60000,
+        "description": "How often to check for status updates (milliseconds). Default is 10000 (10 seconds)."
+      },
+      "debug": {
+        "title": "Debug Logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Enable debug logging for troubleshooting"
       }
     }
-  }
+  },
+  "layout": [
+    {
+      "type": "flex",
+      "flex-flow": "row wrap",
+      "items": [
+        {
+          "type": "flex",
+          "flex-flow": "column",
+          "items": ["username", "password"]
+        }
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced Settings",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "siteId",
+        "pollingInterval",
+        "debug"
+      ]
+    }
+  ]
 }

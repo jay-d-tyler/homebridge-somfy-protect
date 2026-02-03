@@ -1,150 +1,239 @@
-import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
+import type {
+  API,
+  Characteristic,
+  DynamicPlatformPlugin,
+  Logging,
+  PlatformAccessory,
+  PlatformConfig,
+  Service,
+} from 'homebridge';
+import { EventEmitter } from 'events';
 
-import { ExamplePlatformAccessory } from './platformAccessory.js';
-import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-
-// This is only required when using Custom Services and Characteristics not support by HomeKit
-import { EveHomeKitTypes } from 'homebridge-lib/EveHomeKitTypes';
+import { SomfyProtectAlarmAccessory } from './alarmAccessory.js';
+import { PLATFORM_NAME, PLUGIN_NAME, POLLING_CONFIG } from './settings.js';
+import { SomfyProtectApi } from './api.js';
+import type { SomfyProtectConfig, Site } from './types.js';
 
 /**
- * HomebridgePlatform
- * This class is the main constructor for your plugin, this is where you should
- * parse the user config and discover/register accessories with Homebridge.
+ * Somfy Protect Platform
+ * Discovers and manages Somfy Protect alarm systems
  */
-export class ExampleHomebridgePlatform implements DynamicPlatformPlugin {
+export class SomfyProtectPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
   public readonly Characteristic: typeof Characteristic;
-
-  // this is used to track restored cached accessories
   public readonly accessories: Map<string, PlatformAccessory> = new Map();
-  public readonly discoveredCacheUUIDs: string[] = [];
+  public readonly events = new EventEmitter();
 
-  // This is only required when using Custom Services and Characteristics not support by HomeKit
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public readonly CustomServices: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public readonly CustomCharacteristics: any;
+  private api!: SomfyProtectApi;
+  private pollingInterval?: NodeJS.Timeout;
+  private readonly config: SomfyProtectConfig;
+  private readonly accessoryInstances: Map<string, SomfyProtectAlarmAccessory> = new Map();
 
   constructor(
     public readonly log: Logging,
-    public readonly config: PlatformConfig,
-    public readonly api: API,
+    config: PlatformConfig,
+    public readonly homebridgeApi: API,
   ) {
-    this.Service = api.hap.Service;
-    this.Characteristic = api.hap.Characteristic;
+    this.config = config as SomfyProtectConfig;
+    this.Service = homebridgeApi.hap.Service;
+    this.Characteristic = homebridgeApi.hap.Characteristic;
 
-    // This is only required when using Custom Services and Characteristics not support by HomeKit
-    this.CustomServices = new EveHomeKitTypes(this.api).Services;
-    this.CustomCharacteristics = new EveHomeKitTypes(this.api).Characteristics;
+    // Validate configuration
+    if (!this.config.username || !this.config.password) {
+      this.log.error('Username and password are required in config.json');
+      return;
+    }
 
-    this.log.debug('Finished initializing platform:', this.config.name);
+    this.log.debug('Finished initializing platform');
 
-    // When this event is fired it means Homebridge has restored all cached accessories from disk.
-    // Dynamic Platform plugins should only register new accessories after this event was fired,
-    // in order to ensure they weren't added to homebridge already. This event can also be used
-    // to start discovery of new accessories.
-    this.api.on('didFinishLaunching', () => {
-      log.debug('Executed didFinishLaunching callback');
-      // run the method to discover / register your devices as accessories
-      this.discoverDevices();
+    // Wait for Homebridge to finish loading cached accessories
+    this.homebridgeApi.on('didFinishLaunching', () => {
+      this.log.debug('Executed didFinishLaunching callback');
+      this.discoverSites();
+    });
+
+    // Graceful shutdown handler
+    this.homebridgeApi.on('shutdown', () => {
+      this.log.info('Homebridge is shutting down, cleaning up...');
+      this.stopPolling();
+      // Cleanup all accessory instances
+      for (const [, instance] of this.accessoryInstances) {
+        instance.destroy();
+      }
+      this.events.removeAllListeners();
     });
   }
 
   /**
-   * This function is invoked when homebridge restores cached accessories from disk at startup.
-   * It should be used to set up event handlers for characteristics and update respective values.
+   * Restore cached accessory from disk
    */
-  configureAccessory(accessory: PlatformAccessory) {
+  configureAccessory(accessory: PlatformAccessory): void {
     this.log.info('Loading accessory from cache:', accessory.displayName);
-
-    // add the restored accessory to the accessories cache, so we can track if it has already been registered
     this.accessories.set(accessory.UUID, accessory);
   }
 
   /**
-   * This is an example method showing how to register discovered accessories.
-   * Accessories must only be registered once, previously created accessories
-   * must not be registered again to prevent "duplicate UUID" errors.
+   * Discover Somfy Protect sites and register them as accessories
    */
-  discoverDevices() {
-    // EXAMPLE ONLY
-    // A real plugin you would discover accessories from the local network, cloud services
-    // or a user-defined array in the platform config.
-    const exampleDevices = [
-      {
-        exampleUniqueId: 'ABCD',
-        exampleDisplayName: 'Bedroom',
-      },
-      {
-        exampleUniqueId: 'EFGH',
-        exampleDisplayName: 'Kitchen',
-      },
-      {
-        // This is an example of a device which uses a Custom Service
-        exampleUniqueId: 'IJKL',
-        exampleDisplayName: 'Backyard',
-        CustomService: 'AirPressureSensor',
-      },
-    ];
+  private async discoverSites(): Promise<void> {
+    try {
+      // Initialize API client
+      this.api = new SomfyProtectApi(
+        this.log,
+        this.config.username,
+        this.config.password,
+        this.homebridgeApi.user.storagePath(),
+      );
 
-    // loop over the discovered devices and register each one if it has not already been registered
-    for (const device of exampleDevices) {
-      // generate a unique id for the accessory this should be generated from
-      // something globally unique, but constant, for example, the device serial
-      // number or MAC address
-      const uuid = this.api.hap.uuid.generate(device.exampleUniqueId);
+      // Get all sites
+      const sites = await this.api.getSites();
 
-      // see if an accessory with the same uuid has already been registered and restored from
-      // the cached devices we stored in the `configureAccessory` method above
-      const existingAccessory = this.accessories.get(uuid);
-
-      if (existingAccessory) {
-        // the accessory already exists
-        this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-
-        // if you need to update the accessory.context then you should run `api.updatePlatformAccessories`. e.g.:
-        // existingAccessory.context.device = device;
-        // this.api.updatePlatformAccessories([existingAccessory]);
-
-        // create the accessory handler for the restored accessory
-        // this is imported from `platformAccessory.ts`
-        new ExamplePlatformAccessory(this, existingAccessory);
-
-        // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, e.g.:
-        // remove platform accessories when no longer present
-        // this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
-        // this.log.info('Removing existing accessory from cache:', existingAccessory.displayName);
-      } else {
-        // the accessory does not yet exist, so we need to create it
-        this.log.info('Adding new accessory:', device.exampleDisplayName);
-
-        // create a new accessory
-        const accessory = new this.api.platformAccessory(device.exampleDisplayName, uuid);
-
-        // store a copy of the device object in the `accessory.context`
-        // the `context` property can be used to store any data about the accessory you may need
-        accessory.context.device = device;
-
-        // create the accessory handler for the newly create accessory
-        // this is imported from `platformAccessory.ts`
-        new ExamplePlatformAccessory(this, accessory);
-
-        // link the accessory to your platform
-        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      if (sites.length === 0) {
+        this.log.warn('No Somfy Protect sites found on your account');
+        return;
       }
 
-      // push into discoveredCacheUUIDs
-      this.discoveredCacheUUIDs.push(uuid);
+      // Filter to specific site if configured
+      let sitesToRegister: Site[];
+      if (this.config.siteId) {
+        const site = sites.find(s => s.site_id === this.config.siteId);
+        if (!site) {
+          this.log.error(`Configured site ID "${this.config.siteId}" not found`);
+          this.log.error('Available sites:');
+          sites.forEach(s => this.log.error(`  - ${s.label} (${s.site_id})`));
+          return;
+        }
+        sitesToRegister = [site];
+        this.log.info(`Using configured site: ${site.label}`);
+      } else {
+        sitesToRegister = sites;
+        if (sites.length > 1) {
+          this.log.warn(`Multiple sites detected. Add "siteId" to config to select a specific site:`);
+          sites.forEach(s => this.log.warn(`  - ${s.label}: ${s.site_id}`));
+        }
+      }
+
+      // Register each site as an accessory
+      for (const site of sitesToRegister) {
+        this.registerSite(site);
+      }
+
+      // Remove accessories that are no longer present
+      this.removeStaleAccessories(sitesToRegister);
+
+      // Start polling for status updates
+      this.startPolling();
+
+    } catch (error) {
+      this.log.error('Failed to discover Somfy Protect sites:', error);
+      // Retry after delay
+      setTimeout(() => this.discoverSites(), 60000);
+    }
+  }
+
+  /**
+   * Register a Somfy Protect site as an accessory
+   */
+  private registerSite(site: Site): void {
+    const uuid = this.homebridgeApi.hap.uuid.generate(site.site_id);
+    const existingAccessory = this.accessories.get(uuid);
+
+    if (existingAccessory) {
+      // Update existing accessory
+      this.log.info('Restoring existing accessory:', site.label);
+      existingAccessory.context.site = site;
+      this.homebridgeApi.updatePlatformAccessories([existingAccessory]);
+      const instance = new SomfyProtectAlarmAccessory(this, existingAccessory, this.api);
+      this.accessoryInstances.set(uuid, instance);
+    } else {
+      // Create new accessory with proper category
+      this.log.info('Adding new accessory:', site.label);
+      const accessory = new this.homebridgeApi.platformAccessory(
+        site.label,
+        uuid,
+        this.homebridgeApi.hap.Categories.SECURITY_SYSTEM,
+      );
+      accessory.context.site = site;
+      const instance = new SomfyProtectAlarmAccessory(this, accessory, this.api);
+      this.accessoryInstances.set(uuid, instance);
+      this.homebridgeApi.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.set(uuid, accessory);
+    }
+  }
+
+  /**
+   * Remove accessories that no longer exist
+   */
+  private removeStaleAccessories(currentSites: Site[]): void {
+    const currentUUIDs = new Set(
+      currentSites.map(site => this.homebridgeApi.hap.uuid.generate(site.site_id)),
+    );
+
+    const accessoriesToRemove: PlatformAccessory[] = [];
+
+    for (const [uuid, accessory] of this.accessories) {
+      if (!currentUUIDs.has(uuid)) {
+        this.log.info('Removing stale accessory:', accessory.displayName);
+        // Cleanup accessory instance
+        const instance = this.accessoryInstances.get(uuid);
+        if (instance) {
+          instance.destroy();
+          this.accessoryInstances.delete(uuid);
+        }
+        accessoriesToRemove.push(accessory);
+        this.accessories.delete(uuid);
+      }
     }
 
-    // you can also deal with accessories from the cache which are no longer present by removing them from Homebridge
-    // for example, if your plugin logs into a cloud account to retrieve a device list, and a user has previously removed a device
-    // from this cloud account, then this device will no longer be present in the device list but will still be in the Homebridge cache
-    for (const [uuid, accessory] of this.accessories) {
-      if (!this.discoveredCacheUUIDs.includes(uuid)) {
-        this.log.info('Removing existing accessory from cache:', accessory.displayName);
-        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    if (accessoriesToRemove.length > 0) {
+      this.homebridgeApi.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, accessoriesToRemove);
+    }
+  }
+
+  /**
+   * Start polling for status updates
+   */
+  private startPolling(): void {
+    if (this.pollingInterval) {
+      return;
+    }
+
+    const interval = this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
+    this.log.debug(`Starting status polling every ${interval}ms`);
+
+    this.pollingInterval = setInterval(() => {
+      this.pollStatus();
+    }, interval);
+
+    // Do an immediate poll
+    this.pollStatus();
+  }
+
+  /**
+   * Poll for status updates
+   */
+  private async pollStatus(): Promise<void> {
+    try {
+      for (const [, accessory] of this.accessories) {
+        const site = accessory.context.site as Site;
+        const updatedSite = await this.api.getSite(site.site_id);
+
+        // Emit event to notify accessory of update (EventEmitter pattern)
+        this.events.emit('siteUpdated', site.site_id, updatedSite);
       }
+    } catch (error) {
+      this.log.debug('Polling error (will retry):', error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Stop polling (called on shutdown)
+   */
+  public stopPolling(): void {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = undefined;
+      this.log.debug('Stopped status polling');
     }
   }
 }
