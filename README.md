@@ -23,8 +23,8 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 
 🚀 **Adaptive Polling**
 - **NEW**: Intelligent polling that speeds up after state changes
-- Fast polling (3s) right after arming/disarming for immediate feedback
-- Returns to normal polling (10s) when stable to reduce API calls
+- Fast polling (1s) right after arming/disarming for instant feedback
+- Returns to normal polling (60s) when stable to minimize API calls
 - Fully configurable polling intervals and duration
 - Automatic retry on failure with exponential backoff
 - Efficient token caching between restarts
@@ -79,9 +79,9 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
       "username": "your.email@example.com",
       "password": "your-password",
       "siteId": "your-site-id-if-multiple-sites",
-      "pollingInterval": 10000,
+      "pollingInterval": 60000,
       "adaptivePolling": true,
-      "fastPollingInterval": 3000,
+      "fastPollingInterval": 1000,
       "fastPollingDuration": 60000,
       "debug": false
     }
@@ -98,9 +98,9 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
 | \`username\` | Yes | - | Your Somfy Protect account email |
 | \`password\` | Yes | - | Your Somfy Protect account password |
 | \`siteId\` | No | (first site) | Specific site ID if you have multiple homes |
-| \`pollingInterval\` | No | 10000 | Normal polling interval in milliseconds (5000-60000) |
+| \`pollingInterval\` | No | 60000 | Normal polling interval in milliseconds (5000-300000) |
 | \`adaptivePolling\` | No | true | Enable adaptive polling (faster after changes) |
-| \`fastPollingInterval\` | No | 3000 | Fast polling interval after state changes (1000-10000ms) |
+| \`fastPollingInterval\` | No | 1000 | Fast polling interval after state changes (1000-10000ms) |
 | \`fastPollingDuration\` | No | 60000 | How long to use fast polling (10000-300000ms) |
 | \`debug\` | No | false | Enable debug logging |
 

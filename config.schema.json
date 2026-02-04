@@ -44,10 +44,10 @@
       "pollingInterval": {
         "title": "Normal Polling Interval",
         "type": "integer",
-        "default": 10000,
+        "default": 60000,
         "minimum": 5000,
-        "maximum": 60000,
-        "description": "⏱️ How often to check alarm status when stable (milliseconds). Default: 10000 (10 seconds).",
+        "maximum": 300000,
+        "description": "⏱️ How often to check alarm status when stable (milliseconds). Default: 60000 (60 seconds).",
         "x-schema-form": {
           "suffix": "ms"
         }
@@ -61,10 +61,10 @@
       "fastPollingInterval": {
         "title": "Fast Polling Interval",
         "type": "integer",
-        "default": 3000,
+        "default": 1000,
         "minimum": 1000,
         "maximum": 10000,
-        "description": "⚡ How often to check status after a state change (milliseconds). Default: 3000 (3 seconds). Only used when Adaptive Polling is enabled.",
+        "description": "⚡ How often to check status after a state change (milliseconds). Default: 1000 (1 second). Only used when Adaptive Polling is enabled.",
         "condition": {
           "functionBody": "return model.adaptivePolling !== false;"
         },
