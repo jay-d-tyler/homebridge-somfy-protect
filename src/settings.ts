@@ -29,9 +29,8 @@ export const API_CONFIG = {
  * Polling Configuration
  */
 export const POLLING_CONFIG = {
-  INITIAL_INTERVAL: 10000, // 10 seconds
-  FAST_INTERVAL: 5000, // 5 seconds (after state change)
-  SLOW_INTERVAL: 30000, // 30 seconds (when stable)
+  INITIAL_INTERVAL: 10000, // 10 seconds (default)
+  FAST_INTERVAL: 3000, // 3 seconds (after state change with adaptive polling)
   FAST_POLLING_DURATION: 60000, // 1 minute of fast polling after change
   MAX_RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 5000, // 5 seconds between retries

@@ -42,12 +42,46 @@
         }
       },
       "pollingInterval": {
-        "title": "Status Check Interval",
+        "title": "Normal Polling Interval",
         "type": "integer",
         "default": 10000,
         "minimum": 5000,
         "maximum": 60000,
-        "description": "⏱️ How often to check alarm status in milliseconds. Default: 10000 (10 seconds). Lower values = faster updates but more API calls.",
+        "description": "⏱️ How often to check alarm status when stable (milliseconds). Default: 10000 (10 seconds).",
+        "x-schema-form": {
+          "suffix": "ms"
+        }
+      },
+      "adaptivePolling": {
+        "title": "Enable Adaptive Polling",
+        "type": "boolean",
+        "default": true,
+        "description": "🚀 Automatically poll faster after state changes for quicker updates, then slow down when stable. Reduces API calls while staying responsive."
+      },
+      "fastPollingInterval": {
+        "title": "Fast Polling Interval",
+        "type": "integer",
+        "default": 3000,
+        "minimum": 1000,
+        "maximum": 10000,
+        "description": "⚡ How often to check status after a state change (milliseconds). Default: 3000 (3 seconds). Only used when Adaptive Polling is enabled.",
+        "condition": {
+          "functionBody": "return model.adaptivePolling !== false;"
+        },
+        "x-schema-form": {
+          "suffix": "ms"
+        }
+      },
+      "fastPollingDuration": {
+        "title": "Fast Polling Duration",
+        "type": "integer",
+        "default": 60000,
+        "minimum": 10000,
+        "maximum": 300000,
+        "description": "⏲️ How long to use fast polling after a state change (milliseconds). Default: 60000 (60 seconds). After this, returns to normal polling.",
+        "condition": {
+          "functionBody": "return model.adaptivePolling !== false;"
+        },
         "x-schema-form": {
           "suffix": "ms"
         }
@@ -80,6 +114,9 @@
       "items": [
         "siteId",
         "pollingInterval",
+        "adaptivePolling",
+        "fastPollingInterval",
+        "fastPollingDuration",
         "debug"
       ]
     }

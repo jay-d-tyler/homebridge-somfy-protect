@@ -21,8 +21,11 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 - Real-time status updates via polling
 - Automatic state synchronization
 
-🚀 **Smart Polling**
-- Configurable polling interval (5-60 seconds)
+🚀 **Adaptive Polling**
+- **NEW**: Intelligent polling that speeds up after state changes
+- Fast polling (3s) right after arming/disarming for immediate feedback
+- Returns to normal polling (10s) when stable to reduce API calls
+- Fully configurable polling intervals and duration
 - Automatic retry on failure with exponential backoff
 - Efficient token caching between restarts
 
@@ -77,6 +80,9 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
       "password": "your-password",
       "siteId": "your-site-id-if-multiple-sites",
       "pollingInterval": 10000,
+      "adaptivePolling": true,
+      "fastPollingInterval": 3000,
+      "fastPollingDuration": 60000,
       "debug": false
     }
   ]
@@ -92,7 +98,10 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
 | \`username\` | Yes | - | Your Somfy Protect account email |
 | \`password\` | Yes | - | Your Somfy Protect account password |
 | \`siteId\` | No | (first site) | Specific site ID if you have multiple homes |
-| \`pollingInterval\` | No | 10000 | Status update interval in milliseconds (5000-60000) |
+| \`pollingInterval\` | No | 10000 | Normal polling interval in milliseconds (5000-60000) |
+| \`adaptivePolling\` | No | true | Enable adaptive polling (faster after changes) |
+| \`fastPollingInterval\` | No | 3000 | Fast polling interval after state changes (1000-10000ms) |
+| \`fastPollingDuration\` | No | 60000 | How long to use fast polling (10000-300000ms) |
 | \`debug\` | No | false | Enable debug logging |
 
 ## Finding Your Site ID
@@ -203,7 +212,7 @@ Future enhancements planned:
 - [ ] Battery level monitoring
 - [ ] Camera snapshot support
 - [ ] Webhook support (if API allows)
-- [ ] Adaptive polling (faster after changes)
+- [x] ~~Adaptive polling (faster after changes)~~ ✅ **Implemented in v2.0.2!**
 
 ---
 

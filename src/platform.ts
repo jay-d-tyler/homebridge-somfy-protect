@@ -28,6 +28,9 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
   private pollingInterval?: NodeJS.Timeout;
   private readonly config: SomfyProtectConfig;
   private readonly accessoryInstances: Map<string, SomfyProtectAlarmAccessory> = new Map();
+  private lastStateChange: number = 0;
+  private previousStates: Map<string, string> = new Map();
+  private isFastPolling: boolean = false;
 
   constructor(
     public readonly log: Logging,
@@ -198,7 +201,7 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const interval = this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
+    const interval = this.getPollingInterval();
     this.log.debug(`Starting status polling every ${interval}ms`);
 
     this.pollingInterval = setInterval(() => {
@@ -210,13 +213,83 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
   }
 
   /**
+   * Get current polling interval based on adaptive polling settings
+   */
+  private getPollingInterval(): number {
+    const adaptiveEnabled = this.config.adaptivePolling !== false; // Enabled by default
+
+    if (!adaptiveEnabled) {
+      return this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
+    }
+
+    // Check if we should be in fast polling mode
+    const now = Date.now();
+    const fastDuration = this.config.fastPollingDuration || POLLING_CONFIG.FAST_POLLING_DURATION;
+    const timeSinceChange = now - this.lastStateChange;
+
+    if (timeSinceChange < fastDuration) {
+      return this.config.fastPollingInterval || POLLING_CONFIG.FAST_INTERVAL;
+    }
+
+    return this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
+  }
+
+  /**
+   * Restart polling with new interval (for adaptive polling)
+   */
+  private restartPolling(): void {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = undefined;
+    }
+    this.startPolling();
+  }
+
+  /**
    * Poll for status updates
    */
   private async pollStatus(): Promise<void> {
     try {
+      const adaptiveEnabled = this.config.adaptivePolling !== false;
+
       for (const [, accessory] of this.accessories) {
         const site = accessory.context.site as Site;
         const updatedSite = await this.api.getSite(site.site_id);
+
+        // Check for state changes (for adaptive polling)
+        if (adaptiveEnabled) {
+          const previousState = this.previousStates.get(site.site_id);
+          const currentState = updatedSite.security_level;
+
+          if (previousState && previousState !== currentState) {
+            // State changed! Switch to fast polling
+            this.log.info(`Security level changed from ${previousState} to ${currentState} - switching to fast polling`);
+            this.lastStateChange = Date.now();
+
+            // Restart polling with fast interval if not already in fast mode
+            const newInterval = this.getPollingInterval();
+            const wasFastPolling = this.isFastPolling;
+            this.isFastPolling = true;
+
+            if (!wasFastPolling) {
+              this.restartPolling();
+            }
+          } else if (this.isFastPolling) {
+            // Check if we should switch back to normal polling
+            const now = Date.now();
+            const fastDuration = this.config.fastPollingDuration || POLLING_CONFIG.FAST_POLLING_DURATION;
+            const timeSinceChange = now - this.lastStateChange;
+
+            if (timeSinceChange >= fastDuration) {
+              this.log.debug('Switching back to normal polling');
+              this.isFastPolling = false;
+              this.restartPolling();
+            }
+          }
+
+          // Store current state
+          this.previousStates.set(site.site_id, currentState);
+        }
 
         // Emit event to notify accessory of update (EventEmitter pattern)
         this.events.emit('siteUpdated', site.site_id, updatedSite);
