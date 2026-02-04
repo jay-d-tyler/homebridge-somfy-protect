@@ -2,8 +2,8 @@
   "pluginAlias": "SomfyProtect",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Modern Homebridge plugin for Somfy Protect home security systems. For help and documentation please see the [GitHub repository](https://github.com/jay-d-tyler/homebridge-somfy-protect).",
-  "footerDisplay": "💡 **Tip:** After saving, check your Homebridge logs to see detected sites. If you have multiple sites, copy the site ID and add it to Advanced Settings.",
+  "headerDisplay": "Modern Homebridge plugin for Somfy Protect home security systems. For help and documentation please see the [GitHub repository](https://github.com/yourusername/homebridge-somfy-protect).",
+  "footerDisplay": "If you have multiple sites, check your Homebridge logs to find the site IDs.",
   "schema": {
     "type": "object",
     "required": ["username", "password"],
@@ -15,82 +15,53 @@
         "description": "The name that will appear in your Homebridge log."
       },
       "username": {
-        "title": "Email Address",
+        "title": "Username",
         "type": "string",
         "required": true,
         "format": "email",
         "placeholder": "your.email@example.com",
-        "description": "Your Somfy Protect account email (same as Somfy mobile app)"
+        "description": "Your Somfy Protect account email address"
       },
       "password": {
         "title": "Password",
         "type": "string",
         "required": true,
-        "placeholder": "Enter your password",
-        "description": "Your Somfy Protect account password",
-        "x-schema-form": {
-          "type": "password"
-        }
+        "placeholder": "your-password",
+        "description": "Your Somfy Protect account password"
       },
       "siteId": {
-        "title": "Site ID",
+        "title": "Site ID (Optional)",
         "type": "string",
-        "placeholder": "Leave blank to auto-detect",
-        "description": "🏠 For multiple Somfy Protect sites: After saving, check logs to see all detected sites with their IDs. Copy the site ID you want to use and paste it here.",
-        "condition": {
-          "functionBody": "return model.username && model.password;"
-        }
+        "placeholder": "Leave blank for default site",
+        "description": "If you have multiple sites, specify which site to use. Check logs to find site IDs."
       },
       "pollingInterval": {
-        "title": "Normal Polling Interval",
+        "title": "Polling Interval (ms)",
         "type": "integer",
-        "default": 60000,
+        "default": 10000,
         "minimum": 5000,
-        "maximum": 300000,
-        "description": "⏱️ How often to check alarm status when stable (milliseconds). Default: 60000 (60 seconds).",
-        "x-schema-form": {
-          "suffix": "ms"
-        }
-      },
-      "adaptivePolling": {
-        "title": "Enable Adaptive Polling",
-        "type": "boolean",
-        "default": true,
-        "description": "🚀 Automatically poll faster after state changes for quicker updates, then slow down when stable. Reduces API calls while staying responsive."
-      },
-      "fastPollingInterval": {
-        "title": "Fast Polling Interval",
-        "type": "integer",
-        "default": 1000,
-        "minimum": 1000,
-        "maximum": 10000,
-        "description": "⚡ How often to check status after a state change (milliseconds). Default: 1000 (1 second). Only used when Adaptive Polling is enabled.",
-        "condition": {
-          "functionBody": "return model.adaptivePolling !== false;"
-        },
-        "x-schema-form": {
-          "suffix": "ms"
-        }
-      },
-      "fastPollingDuration": {
-        "title": "Fast Polling Duration",
-        "type": "integer",
-        "default": 60000,
-        "minimum": 10000,
-        "maximum": 300000,
-        "description": "⏲️ How long to use fast polling after a state change (milliseconds). Default: 60000 (60 seconds). After this, returns to normal polling.",
-        "condition": {
-          "functionBody": "return model.adaptivePolling !== false;"
-        },
-        "x-schema-form": {
-          "suffix": "ms"
-        }
+        "maximum": 60000,
+        "description": "How often to check for status updates (milliseconds). Default is 10000 (10 seconds)."
       },
       "debug": {
         "title": "Debug Logging",
         "type": "boolean",
         "default": false,
         "description": "Enable debug logging for troubleshooting"
+      },
+      "httpPort": {
+        "title": "🌐 HTTP API Port",
+        "type": "integer",
+        "default": 8581,
+        "minimum": 0,
+        "maximum": 65535,
+        "description": "Port for the HTTP API used by automation plugins. Set to 0 to disable."
+      },
+      "httpToken": {
+        "title": "🔒 HTTP API Token",
+        "type": "string",
+        "placeholder": "Optional security token",
+        "description": "Optional token for securing the HTTP API. If set, requests must include 'Authorization: Bearer YOUR_TOKEN' header."
       }
     }
   },
@@ -114,10 +85,17 @@
       "items": [
         "siteId",
         "pollingInterval",
-        "adaptivePolling",
-        "fastPollingInterval",
-        "fastPollingDuration",
         "debug"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "HTTP API (for Automation)",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "httpPort",
+        "httpToken"
       ]
     }
   ]

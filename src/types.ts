@@ -9,10 +9,9 @@ export interface SomfyProtectConfig {
   password: string;
   siteId?: string;
   pollingInterval?: number;
-  adaptivePolling?: boolean;
-  fastPollingInterval?: number;
-  fastPollingDuration?: number;
   debug?: boolean;
+  httpPort?: number;
+  httpToken?: string;
 }
 
 export interface OAuthToken {

@@ -12,6 +12,7 @@ import { EventEmitter } from 'events';
 import { SomfyProtectAlarmAccessory } from './alarmAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME, POLLING_CONFIG } from './settings.js';
 import { SomfyProtectApi } from './api.js';
+import { HttpApiServer } from './httpServer.js';
 import type { SomfyProtectConfig, Site } from './types.js';
 
 /**
@@ -28,9 +29,7 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
   private pollingInterval?: NodeJS.Timeout;
   private readonly config: SomfyProtectConfig;
   private readonly accessoryInstances: Map<string, SomfyProtectAlarmAccessory> = new Map();
-  private lastStateChange: number = 0;
-  private previousStates: Map<string, string> = new Map();
-  private isFastPolling: boolean = false;
+  private httpServer?: HttpApiServer;
 
   constructor(
     public readonly log: Logging,
@@ -59,6 +58,10 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
     this.homebridgeApi.on('shutdown', () => {
       this.log.info('Homebridge is shutting down, cleaning up...');
       this.stopPolling();
+      // Stop HTTP server
+      if (this.httpServer) {
+        this.httpServer.stop();
+      }
       // Cleanup all accessory instances
       for (const [, instance] of this.accessoryInstances) {
         instance.destroy();
@@ -126,6 +129,17 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
 
       // Start polling for status updates
       this.startPolling();
+
+      // Start HTTP API server if enabled
+      if (this.config.httpPort !== undefined && this.config.httpPort !== 0) {
+        this.httpServer = new HttpApiServer(
+          this.log,
+          this.config.httpPort,
+          this.config.httpToken,
+          this.disarmAllAlarms.bind(this),
+        );
+        this.httpServer.start();
+      }
 
     } catch (error) {
       this.log.error('Failed to discover Somfy Protect sites:', error);
@@ -201,7 +215,7 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const interval = this.getPollingInterval();
+    const interval = this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
     this.log.debug(`Starting status polling every ${interval}ms`);
 
     this.pollingInterval = setInterval(() => {
@@ -213,82 +227,13 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
   }
 
   /**
-   * Get current polling interval based on adaptive polling settings
-   */
-  private getPollingInterval(): number {
-    const adaptiveEnabled = this.config.adaptivePolling !== false; // Enabled by default
-
-    if (!adaptiveEnabled) {
-      return this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
-    }
-
-    // Check if we should be in fast polling mode
-    const now = Date.now();
-    const fastDuration = this.config.fastPollingDuration || POLLING_CONFIG.FAST_POLLING_DURATION;
-    const timeSinceChange = now - this.lastStateChange;
-
-    if (timeSinceChange < fastDuration) {
-      return this.config.fastPollingInterval || POLLING_CONFIG.FAST_INTERVAL;
-    }
-
-    return this.config.pollingInterval || POLLING_CONFIG.INITIAL_INTERVAL;
-  }
-
-  /**
-   * Restart polling with new interval (for adaptive polling)
-   */
-  private restartPolling(): void {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = undefined;
-    }
-    this.startPolling();
-  }
-
-  /**
    * Poll for status updates
    */
   private async pollStatus(): Promise<void> {
     try {
-      const adaptiveEnabled = this.config.adaptivePolling !== false;
-
       for (const [, accessory] of this.accessories) {
         const site = accessory.context.site as Site;
         const updatedSite = await this.api.getSite(site.site_id);
-
-        // Check for state changes (for adaptive polling)
-        if (adaptiveEnabled) {
-          const previousState = this.previousStates.get(site.site_id);
-          const currentState = updatedSite.security_level;
-
-          if (previousState && previousState !== currentState) {
-            // State changed! Switch to fast polling
-            this.log.info(`Security level changed from ${previousState} to ${currentState} - switching to fast polling`);
-            this.lastStateChange = Date.now();
-
-            // Restart polling with fast interval if not already in fast mode
-            const wasFastPolling = this.isFastPolling;
-            this.isFastPolling = true;
-
-            if (!wasFastPolling) {
-              this.restartPolling();
-            }
-          } else if (this.isFastPolling) {
-            // Check if we should switch back to normal polling
-            const now = Date.now();
-            const fastDuration = this.config.fastPollingDuration || POLLING_CONFIG.FAST_POLLING_DURATION;
-            const timeSinceChange = now - this.lastStateChange;
-
-            if (timeSinceChange >= fastDuration) {
-              this.log.debug('Switching back to normal polling');
-              this.isFastPolling = false;
-              this.restartPolling();
-            }
-          }
-
-          // Store current state
-          this.previousStates.set(site.site_id, currentState);
-        }
 
         // Emit event to notify accessory of update (EventEmitter pattern)
         this.events.emit('siteUpdated', site.site_id, updatedSite);
@@ -307,5 +252,51 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
       this.pollingInterval = undefined;
       this.log.debug('Stopped status polling');
     }
+  }
+
+  /**
+   * Disarm all alarm systems (called by HTTP API)
+   */
+  private async disarmAllAlarms(): Promise<void> {
+    this.log.info('Disarming all alarm systems via HTTP API');
+
+    const disarmPromises: Promise<void>[] = [];
+
+    for (const [uuid] of this.accessoryInstances) {
+      const accessory = this.accessories.get(uuid);
+      if (accessory) {
+        const site = accessory.context.site as Site;
+
+        // Only disarm if not already disarmed
+        if (site.security_level !== 'disarmed') {
+          this.log.info(`Disarming ${site.label}`);
+          disarmPromises.push(
+            this.api.setSecurityLevel(site.site_id, 'disarmed')
+              .then(() => {
+                // Update local cache
+                site.security_level = 'disarmed';
+                accessory.context.site = site;
+                // Notify the accessory instance
+                this.events.emit('siteUpdated', site.site_id, site);
+              })
+              .catch((error) => {
+                this.log.error(`Failed to disarm ${site.label}:`, error);
+                throw error;
+              }),
+          );
+        } else {
+          this.log.debug(`${site.label} is already disarmed`);
+        }
+      }
+    }
+
+    if (disarmPromises.length === 0) {
+      this.log.info('All alarm systems are already disarmed');
+      return;
+    }
+
+    // Wait for all disarm commands to complete
+    await Promise.all(disarmPromises);
+    this.log.info('All alarm systems disarmed successfully');
   }
 }

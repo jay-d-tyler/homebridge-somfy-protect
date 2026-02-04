@@ -2,7 +2,7 @@
   "name": "@jay-d-tyler/homebridge-somfy-protect",
   "displayName": "Somfy Protect",
   "type": "module",
-  "version": "2.1.0",
+  "version": "2.2.1",
   "private": false,
   "description": "Modern Homebridge plugin to integrate Somfy Protect home security system with HomeKit.",
   "author": "Jay",
@@ -40,7 +40,7 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
-    "verify-build": "test -d dist && test -f dist/index.js || (echo 'ERROR: dist folder not built! Run npm run build first.' && exit 1)",
+    "verify-build": "test -d dist && test -f dist/index.js || (echo 'ERROR: dist folder not built!' && exit 1)",
     "prepublishOnly": "npm run lint && npm run build && npm run verify-build",
     "watch": "npm run build && npm link && nodemon"
   },
