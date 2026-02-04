@@ -267,7 +267,6 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
             this.lastStateChange = Date.now();
 
             // Restart polling with fast interval if not already in fast mode
-            const newInterval = this.getPollingInterval();
             const wasFastPolling = this.isFastPolling;
             this.isFastPolling = true;
 
