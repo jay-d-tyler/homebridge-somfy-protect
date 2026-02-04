@@ -1,7 +1,7 @@
 # Homebridge Somfy Protect
 
-[![npm version](https://badge.fury.io/js/homebridge-somfy-protect.svg)](https://badge.fury.io/js/homebridge-somfy-protect)
-[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
+[![npm version](https://badge.fury.io/js/%40jay-d-tyler%2Fhomebridge-somfy-protect.svg)](https://badge.fury.io/js/%40jay-d-tyler%2Fhomebridge-somfy-protect)
+[![npm](https://img.shields.io/npm/dt/@jay-d-tyler/homebridge-somfy-protect)](https://www.npmjs.com/package/@jay-d-tyler/homebridge-somfy-protect)
 
 Modern Homebridge plugin to integrate Somfy Protect home security systems with Apple HomeKit.
 
@@ -46,7 +46,7 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 ### Manual Installation
 
 \`\`\`bash
-npm install -g homebridge-somfy-protect
+npm install -g @jay-d-tyler/homebridge-somfy-protect
 \`\`\`
 
 ## Configuration

@@ -6,7 +6,7 @@ export const PLATFORM_NAME = 'SomfyProtect';
 /**
  * This must match the name of your plugin as defined the package.json
  */
-export const PLUGIN_NAME = 'homebridge-somfy-protect';
+export const PLUGIN_NAME = '@jay-d-tyler/homebridge-somfy-protect';
 
 /**
  * Somfy Protect API Configuration
