@@ -17,7 +17,6 @@
       "username": {
         "title": "Username",
         "type": "string",
-        "required": true,
         "format": "email",
         "placeholder": "your.email@example.com",
         "description": "Your Somfy Protect account email address"
@@ -25,7 +24,6 @@
       "password": {
         "title": "Password",
         "type": "string",
-        "required": true,
         "placeholder": "your-password",
         "description": "Your Somfy Protect account password"
       },
