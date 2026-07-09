@@ -57,7 +57,9 @@ export class SomfyProtectAuth {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(this.tokenPath, JSON.stringify(this.token, null, 2));
+      // 0600 — the file holds live credentials for the alarm system
+      fs.writeFileSync(this.tokenPath, JSON.stringify(this.token, null, 2), { mode: 0o600 });
+      fs.chmodSync(this.tokenPath, 0o600);
       this.log.debug('Saved authentication token to cache');
     } catch (error) {
       this.log.error('Failed to save token:', error);

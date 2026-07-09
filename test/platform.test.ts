@@ -36,7 +36,9 @@ describe('SomfyProtectPlatform', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
+    // Legacy fake timers make setTimeout/setInterval jest mocks, which the
+    // polling assertions below rely on
+    jest.useFakeTimers({ legacyFakeTimers: true });
 
     // Mock logger
     mockLogger = {
@@ -189,10 +191,11 @@ describe('SomfyProtectPlatform', () => {
         mockApi,
       );
 
-      // Get the callback for this platform
-      const callbacks = (mockApi.on as jest.Mock).mock.calls;
-      const launchCallback = callbacks.find(call => call[0] === 'didFinishLaunching')[1];
+      // Get the callback for this platform (the last one registered)
+      const launchCalls = (mockApi.on as jest.Mock).mock.calls.filter(call => call[0] === 'didFinishLaunching');
+      const launchCallback = launchCalls[launchCalls.length - 1][1];
 
+      (mockApi.registerPlatformAccessories as jest.Mock).mockClear();
       await launchCallback();
       await Promise.resolve();
 
@@ -208,8 +211,8 @@ describe('SomfyProtectPlatform', () => {
         mockApi,
       );
 
-      const callbacks = (mockApi.on as jest.Mock).mock.calls;
-      const launchCallback = callbacks.find(call => call[0] === 'didFinishLaunching')[1];
+      const launchCalls = (mockApi.on as jest.Mock).mock.calls.filter(call => call[0] === 'didFinishLaunching');
+      const launchCallback = launchCalls[launchCalls.length - 1][1];
 
       await launchCallback();
       await Promise.resolve();
@@ -260,7 +263,7 @@ describe('SomfyProtectPlatform', () => {
 
     it('should register accessory with Homebridge', () => {
       expect(mockApi.registerPlatformAccessories).toHaveBeenCalledWith(
-        'homebridge-somfy-protect',
+        '@jay-d-tyler/homebridge-somfy-protect',
         'SomfyProtect',
         expect.any(Array),
       );
@@ -283,7 +286,8 @@ describe('SomfyProtectPlatform', () => {
       platform.accessories.set('uuid-site-1', existingAccessory);
 
       // Trigger discovery again
-      platform.registerSite(mockSites[0]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (platform as any).registerSite(mockSites[0]);
 
       expect(mockApi.updatePlatformAccessories).toHaveBeenCalledWith([existingAccessory]);
       expect(mockLogger.info).toHaveBeenCalledWith('Restoring existing accessory:', 'Home');
@@ -305,13 +309,13 @@ describe('SomfyProtectPlatform', () => {
         destroy: jest.fn(),
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      platform.accessoryInstances.set('uuid-stale', mockAccessoryInstance as any);
+      (platform as any).accessoryInstances.set('uuid-stale', mockAccessoryInstance as any);
 
       await didFinishLaunchingCallback();
       await Promise.resolve();
 
       expect(mockApi.unregisterPlatformAccessories).toHaveBeenCalledWith(
-        'homebridge-somfy-protect',
+        '@jay-d-tyler/homebridge-somfy-protect',
         'SomfyProtect',
         [staleAccessory],
       );
@@ -327,15 +331,15 @@ describe('SomfyProtectPlatform', () => {
     });
 
     it('should start polling after discovery', () => {
-      expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 10000);
+      expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 60000);
     });
 
     it('should use custom polling interval from config', async () => {
       const customConfig = { ...mockConfig, pollingInterval: 15000 };
       new SomfyProtectPlatform(mockLogger, customConfig, mockApi);
 
-      const callbacks = (mockApi.on as jest.Mock).mock.calls;
-      const launchCallback = callbacks.find(call => call[0] === 'didFinishLaunching')[1];
+      const launchCalls = (mockApi.on as jest.Mock).mock.calls.filter(call => call[0] === 'didFinishLaunching');
+      const launchCallback = launchCalls[launchCalls.length - 1][1];
 
       await launchCallback();
       await Promise.resolve();
@@ -351,7 +355,7 @@ describe('SomfyProtectPlatform', () => {
       platform.events.on('siteUpdated', eventSpy);
 
       // Trigger poll
-      jest.advanceTimersByTime(10000);
+      jest.advanceTimersByTime(60000);
       await Promise.resolve();
 
       expect(mockSomfyApi.getSite).toHaveBeenCalled();
@@ -362,7 +366,7 @@ describe('SomfyProtectPlatform', () => {
       mockSomfyApi.getSite.mockRejectedValue(new Error('Polling error'));
 
       // Trigger poll
-      jest.advanceTimersByTime(10000);
+      jest.advanceTimersByTime(60000);
       await Promise.resolve();
 
       expect(mockLogger.debug).toHaveBeenCalledWith(
@@ -374,7 +378,8 @@ describe('SomfyProtectPlatform', () => {
     it('should not create duplicate polling intervals', () => {
       const initialCallCount = (setInterval as jest.Mock).mock.calls.length;
 
-      platform.startPolling();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (platform as any).startPolling();
 
       expect((setInterval as jest.Mock).mock.calls.length).toBe(initialCallCount);
     });
@@ -413,7 +418,7 @@ describe('SomfyProtectPlatform', () => {
         destroy: jest.fn(),
       };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      platform.accessoryInstances.set('uuid-site-1', mockAccessoryInstance as any);
+      (platform as any).accessoryInstances.set('uuid-site-1', mockAccessoryInstance as any);
 
       shutdownCallback();
 

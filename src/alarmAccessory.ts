@@ -11,7 +11,16 @@ import { SomfyProtectApiError } from './types.js';
 export class SomfyProtectAlarmAccessory {
   private service: Service;
   private isReachable = true;
-  private readonly STALENESS_THRESHOLD = 60000; // 60 seconds
+  // Kept so destroy() can remove the exact listener instance registered below
+  private readonly boundHandleSiteUpdate: (siteId: string, updatedSite: Site) => void;
+
+  /**
+   * Data older than this is considered stale. Derived from the polling
+   * interval so a slow (e.g. 60s+) poll doesn't trip false faults between polls.
+   */
+  private get stalenessThreshold(): number {
+    return Math.max(90000, this.platform.getNormalPollingInterval() * 2 + 30000);
+  }
 
   constructor(
     private readonly platform: SomfyProtectPlatform,
@@ -67,7 +76,8 @@ export class SomfyProtectAlarmAccessory {
       .onGet(this.getStatusFault.bind(this));
 
     // Listen for site updates from platform (EventEmitter pattern)
-    this.platform.events.on('siteUpdated', this.handleSiteUpdate.bind(this));
+    this.boundHandleSiteUpdate = this.handleSiteUpdate.bind(this);
+    this.platform.events.on('siteUpdated', this.boundHandleSiteUpdate);
 
     // Set initial state
     this.updateCharacteristics();
@@ -131,7 +141,7 @@ export class SomfyProtectAlarmAccessory {
     try {
       // Check if data is stale
       const lastUpdate = this.accessory.context.lastUpdate as number;
-      const isStale = !lastUpdate || (Date.now() - lastUpdate > this.STALENESS_THRESHOLD);
+      const isStale = !lastUpdate || (Date.now() - lastUpdate > this.stalenessThreshold);
 
       if (isStale) {
         this.isReachable = false;
@@ -221,7 +231,7 @@ export class SomfyProtectAlarmAccessory {
    */
   async getStatusFault(): Promise<CharacteristicValue> {
     const lastUpdate = this.accessory.context.lastUpdate as number;
-    const isStale = !lastUpdate || (Date.now() - lastUpdate > this.STALENESS_THRESHOLD);
+    const isStale = !lastUpdate || (Date.now() - lastUpdate > this.stalenessThreshold);
 
     if (isStale || !this.isReachable) {
       return this.platform.Characteristic.StatusFault.GENERAL_FAULT;
@@ -307,7 +317,7 @@ export class SomfyProtectAlarmAccessory {
    */
   public destroy(): void {
     // Remove event listeners
-    this.platform.events.removeListener('siteUpdated', this.handleSiteUpdate.bind(this));
+    this.platform.events.removeListener('siteUpdated', this.boundHandleSiteUpdate);
     this.platform.log.debug('Cleaned up alarm accessory');
   }
 }

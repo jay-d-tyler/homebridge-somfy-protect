@@ -1,7 +1,8 @@
 import { SomfyProtectAlarmAccessory } from '../src/alarmAccessory.js';
 import type { SomfyProtectPlatform } from '../src/platform.js';
 import type { SomfyProtectApi } from '../src/api.js';
-import type { PlatformAccessory, Service } from 'homebridge';
+import type { PlatformAccessory } from 'homebridge';
+import { SomfyProtectApiError } from '../src/types.js';
 import { EventEmitter } from 'events';
 
 describe('SomfyProtectAlarmAccessory', () => {
@@ -9,7 +10,9 @@ describe('SomfyProtectAlarmAccessory', () => {
   let mockPlatform: jest.Mocked<SomfyProtectPlatform>;
   let mockAccessory: jest.Mocked<PlatformAccessory>;
   let mockApi: jest.Mocked<SomfyProtectApi>;
-  let mockService: jest.Mocked<Service>;
+  // Combines Service and Characteristic surfaces (mockReturnThis chaining)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockService: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockCharacteristic: any;
 
@@ -67,6 +70,8 @@ describe('SomfyProtectAlarmAccessory', () => {
         debug: jest.fn(),
       },
       events: new EventEmitter(),
+      // 10s interval -> 90s staleness threshold (the Math.max floor)
+      getNormalPollingInterval: jest.fn().mockReturnValue(10000),
       homebridgeApi: {
         hap: {
           HapStatusError: class HapStatusError extends Error {
@@ -334,10 +339,7 @@ describe('SomfyProtectAlarmAccessory', () => {
 
   describe('error handling', () => {
     it('should log authentication errors with user-friendly message', async () => {
-      const error = {
-        statusCode: 401,
-        message: 'Unauthorized',
-      };
+      const error = new SomfyProtectApiError('Unauthorized', 401);
       mockApi.setSecurityLevel.mockRejectedValueOnce(error);
 
       await expect(accessory.setTargetState(1)).rejects.toThrow();
@@ -348,10 +350,7 @@ describe('SomfyProtectAlarmAccessory', () => {
     });
 
     it('should log rate limit errors with user-friendly message', async () => {
-      const error = {
-        statusCode: 429,
-        message: 'Too many requests',
-      };
+      const error = new SomfyProtectApiError('Too many requests', 429);
       mockApi.setSecurityLevel.mockRejectedValueOnce(error);
 
       await expect(accessory.setTargetState(1)).rejects.toThrow();
@@ -362,10 +361,7 @@ describe('SomfyProtectAlarmAccessory', () => {
     });
 
     it('should log server errors with user-friendly message', async () => {
-      const error = {
-        statusCode: 500,
-        message: 'Internal server error',
-      };
+      const error = new SomfyProtectApiError('Internal server error', 500);
       mockApi.setSecurityLevel.mockRejectedValueOnce(error);
 
       await expect(accessory.setTargetState(1)).rejects.toThrow();

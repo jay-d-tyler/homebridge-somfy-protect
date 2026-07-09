@@ -19,7 +19,15 @@ describe('SomfyProtectAuth', () => {
   const password = 'test-password';
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Reset implementations too — mockReturnValue(...) set in one test must not
+    // leak into the next (clearAllMocks only clears call data)
+    jest.resetAllMocks();
+
+    // The auto-mock replaces isAxiosError with a stub returning undefined;
+    // restore its real behavior so error-handling paths are exercised
+    (mockedAxios.isAxiosError as unknown as jest.Mock).mockImplementation(
+      (payload: unknown) => !!(payload && typeof payload === 'object' && 'isAxiosError' in payload),
+    );
 
     // Mock logger
     mockLogger = {
@@ -297,6 +305,7 @@ describe('SomfyProtectAuth', () => {
       expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
         path.join(storagePath, 'somfy-protect-token.json'),
         expect.stringContaining('test-token'),
+        { mode: 0o600 },
       );
       expect(mockLogger.debug).toHaveBeenCalledWith('Saved authentication token to cache');
     });

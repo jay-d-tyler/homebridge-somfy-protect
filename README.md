@@ -22,7 +22,8 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 - Automatic state synchronization
 
 🚀 **Smart Polling**
-- Configurable polling interval (5-60 seconds)
+- Adaptive polling: fast (1s) updates right after a state change, slow (60s) when stable
+- Configurable polling intervals (5-300 seconds)
 - Automatic retry on failure with exponential backoff
 - Efficient token caching between restarts
 
@@ -82,9 +83,12 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
       "username": "your.email@example.com",
       "password": "your-password",
       "siteId": "your-site-id-if-multiple-sites",
-      "pollingInterval": 10000,
+      "pollingInterval": 60000,
+      "adaptivePolling": true,
+      "fastPollingInterval": 1000,
+      "fastPollingDuration": 60000,
       "debug": false,
-      "httpPort": 8581,
+      "httpPort": 8582,
       "httpToken": "your-secret-token"
     }
   ]
@@ -100,10 +104,13 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
 | \`username\` | Yes | - | Your Somfy Protect account email |
 | \`password\` | Yes | - | Your Somfy Protect account password |
 | \`siteId\` | No | (first site) | Specific site ID if you have multiple homes |
-| \`pollingInterval\` | No | 10000 | Status update interval in milliseconds (5000-60000) |
+| \`pollingInterval\` | No | 60000 | Normal status update interval in milliseconds (5000-300000) |
+| \`adaptivePolling\` | No | true | Poll faster right after a state change, then slow back down |
+| \`fastPollingInterval\` | No | 1000 | Poll interval after a state change in milliseconds (1000-10000) |
+| \`fastPollingDuration\` | No | 60000 | How long to fast-poll after a state change in milliseconds |
 | \`debug\` | No | false | Enable debug logging |
-| \`httpPort\` | No | 8581 | Port for HTTP API server (set to 0 to disable) |
-| \`httpToken\` | No | - | Optional security token for HTTP API |
+| \`httpPort\` | No | 0 (disabled) | Port for HTTP API server; avoid 8581, which the Homebridge UI uses |
+| \`httpToken\` | No | - | Security token for HTTP API (strongly recommended) |
 
 ## Finding Your Site ID
 
@@ -132,13 +139,13 @@ Add \`httpPort\` to your configuration:
   "platform": "SomfyProtect",
   "username": "your.email@example.com",
   "password": "your-password",
-  "httpPort": 8581,
+  "httpPort": 8582,
   "httpToken": "your-secret-token"
 }
 \`\`\`
 
-- **httpPort**: Port number for the API server (default: 8581, set to 0 to disable)
-- **httpToken**: Optional security token (highly recommended)
+- **httpPort**: Port number for the API server (default: 0 = disabled). Avoid 8581 — the Homebridge UI usually runs there.
+- **httpToken**: Security token (strongly recommended — without it, anyone who can reach the port can disarm your alarm)
 
 ### Using the HTTP API
 
@@ -146,10 +153,10 @@ Add \`httpPort\` to your configuration:
 
 \`\`\`bash
 # Without authentication
-curl -X POST http://localhost:8581/disarm
+curl -X POST http://localhost:8582/disarm
 
 # With authentication token
-curl -X POST http://localhost:8581/disarm \\
+curl -X POST http://localhost:8582/disarm \\
   -H "Authorization: Bearer your-secret-token"
 \`\`\`
 
@@ -163,10 +170,10 @@ curl -X POST http://localhost:8581/disarm \\
 
 ### Security Considerations
 
-- **Always use httpToken** in production environments
-- The API only accepts connections from your local network
-- Consider using a firewall to restrict access to the API port
+- **Always set httpToken.** Without it, any device (or any web page open in a browser) that can reach the port can disarm your alarm.
+- The server listens on **all network interfaces** of the Homebridge host — it is reachable from your whole LAN, and from further if the host is exposed. Use a firewall to restrict access to the API port.
 - The token must be sent in the \`Authorization\` header as a Bearer token
+- The API is disabled by default (\`httpPort\` unset or 0)
 
 ### Example: Virtual Switch Integration
 
@@ -176,7 +183,7 @@ You can use this API with automation plugins like [homebridge-http-switch](https
 {
   "accessory": "HTTP-SWITCH",
   "name": "Disarm Alarm",
-  "onUrl": "http://localhost:8581/disarm",
+  "onUrl": "http://localhost:8582/disarm",
   "httpMethod": "POST",
   "headers": {
     "Authorization": "Bearer your-secret-token"
@@ -278,7 +285,6 @@ Future enhancements planned:
 - [ ] Battery level monitoring
 - [ ] Camera snapshot support
 - [ ] Webhook support (if API allows)
-- [ ] Adaptive polling (faster after changes)
 
 ---
 

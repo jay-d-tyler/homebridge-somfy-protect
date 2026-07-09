@@ -74,17 +74,18 @@ export class SomfyProtectApi {
         if (axios.isAxiosError(error)) {
           const status = error.response?.status;
 
-          // Handle authentication errors
-          if (status === 401) {
+          // Handle authentication errors — retry once with a refreshed token.
+          // The _authRetried flag stops an infinite loop when the API keeps
+          // returning 401 even after a refresh.
+          const config = error.config as (typeof error.config & { _authRetried?: boolean }) | undefined;
+          if (status === 401 && config && !config._authRetried) {
             this.log.warn('Authentication error, attempting to refresh token');
             try {
               await this.auth.forceRefresh();
-              // Retry the original request
-              if (error.config) {
-                const token = await this.auth.getAccessToken();
-                error.config.headers.Authorization = `Bearer ${token}`;
-                return this.axios.request(error.config);
-              }
+              const token = await this.auth.getAccessToken();
+              config._authRetried = true;
+              config.headers.Authorization = `Bearer ${token}`;
+              return this.axios.request(config);
             } catch (refreshError) {
               this.log.error('Token refresh failed:', refreshError);
             }

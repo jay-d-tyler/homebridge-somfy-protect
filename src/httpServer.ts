@@ -1,4 +1,5 @@
 import type { Logging } from 'homebridge';
+import crypto from 'crypto';
 import http from 'http';
 
 /**
@@ -42,7 +43,7 @@ export class HttpApiServer {
         // Check token if configured
         if (this.token) {
           const authHeader = req.headers.authorization;
-          if (!authHeader || authHeader !== `Bearer ${this.token}`) {
+          if (!authHeader || !this.tokenMatches(authHeader)) {
             this.log.warn('Unauthorized HTTP API request (invalid token)');
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Unauthorized' }));
@@ -84,6 +85,16 @@ export class HttpApiServer {
         this.log.warn('HTTP API authentication disabled - anyone on your network can trigger disarm');
       }
     });
+  }
+
+  /**
+   * Constant-time comparison of the Authorization header against the
+   * configured token, so response timing can't be used to guess it
+   */
+  private tokenMatches(authHeader: string): boolean {
+    const expected = Buffer.from(`Bearer ${this.token}`);
+    const received = Buffer.from(authHeader);
+    return expected.length === received.length && crypto.timingSafeEqual(expected, received);
   }
 
   /**
