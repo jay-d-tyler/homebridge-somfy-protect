@@ -2,9 +2,20 @@ import { HttpApiServer } from '../src/httpServer.js';
 import type { Logging } from 'homebridge';
 import http from 'http';
 
+interface HttpResult {
+  statusCode: number | undefined;
+  headers: http.IncomingHttpHeaders;
+  body: Record<string, unknown> | undefined;
+}
+
+const waitForListening = () => new Promise(resolve => setTimeout(resolve, 20));
+let nextPort = 30000 + (process.pid % 20000);
+
 describe('HttpApiServer', () => {
   let mockLog: jest.Mocked<Logging>;
   let mockDisarmCallback: jest.Mock;
+  let mockArmAwayCallback: jest.Mock;
+  let mockArmNightCallback: jest.Mock;
 
   beforeEach(() => {
     mockLog = {
@@ -17,326 +28,224 @@ describe('HttpApiServer', () => {
     } as unknown as jest.Mocked<Logging>;
 
     mockDisarmCallback = jest.fn().mockResolvedValue(undefined);
+    mockArmAwayCallback = jest.fn().mockResolvedValue(undefined);
+    mockArmNightCallback = jest.fn().mockResolvedValue(undefined);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
+  const createServer = (
+    port: number,
+    token: string | undefined = 'valid-token',
+  ) => new HttpApiServer(
+    mockLog,
+    port,
+    token,
+    mockDisarmCallback,
+    mockArmAwayCallback,
+    mockArmNightCallback,
+  );
+
+  const request = (
+    port: number,
+    path: string,
+    method = 'POST',
+    token: string | undefined = 'valid-token',
+  ): Promise<HttpResult> => new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path,
+      method,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve({
+        statusCode: res.statusCode,
+        headers: res.headers,
+        body: data ? JSON.parse(data) as Record<string, unknown> : undefined,
+      }));
+    });
+    req.on('error', reject);
+    req.end();
   });
 
   describe('start', () => {
     it('should not start server when port is 0', () => {
-      const server = new HttpApiServer(mockLog, 0, undefined, mockDisarmCallback);
+      const server = createServer(0, undefined);
       server.start();
 
       expect(mockLog.info).toHaveBeenCalledWith('HTTP API disabled (port set to 0)');
     });
 
-    it('should start server on specified port', (done) => {
-      const server = new HttpApiServer(mockLog, 8581, undefined, mockDisarmCallback);
+    it('should log all available endpoints', async () => {
+      const port = nextPort++;
+      const server = createServer(port);
       server.start();
+      await waitForListening();
 
-      // Wait for server to start
-      setTimeout(() => {
-        expect(mockLog.info).toHaveBeenCalledWith('HTTP API server listening on port 8581');
-        expect(mockLog.info).toHaveBeenCalledWith('Available endpoint: POST /disarm');
-        server.stop();
-        done();
-      }, 100);
+      expect(mockLog.info).toHaveBeenCalledWith(
+        `HTTP API server listening on 127.0.0.1:${port}`,
+      );
+      expect(mockLog.info).toHaveBeenCalledWith('Available endpoint: POST /disarm');
+      expect(mockLog.info).toHaveBeenCalledWith('Available endpoint: POST /arm/away');
+      expect(mockLog.info).toHaveBeenCalledWith('Available endpoint: POST /arm/night');
+      expect(mockLog.info).toHaveBeenCalledWith('HTTP API authentication enabled');
+      server.stop();
     });
 
-    it('should log warning when authentication is disabled', (done) => {
-      const server = new HttpApiServer(mockLog, 8582, undefined, mockDisarmCallback);
+    it('should refuse to start when authentication is missing', () => {
+      const server = createServer(nextPort++, '');
       server.start();
 
-      setTimeout(() => {
-        expect(mockLog.warn).toHaveBeenCalledWith(
-          'HTTP API authentication disabled - anyone on your network can trigger disarm',
-        );
-        server.stop();
-        done();
-      }, 100);
+      expect(mockLog.error).toHaveBeenCalledWith(
+        'HTTP API not started: httpToken is required when httpPort is enabled',
+      );
     });
 
-    it('should log info when authentication is enabled', (done) => {
-      const server = new HttpApiServer(mockLog, 8583, 'test-token', mockDisarmCallback);
+    it('should refuse to start twice', async () => {
+      const server = createServer(nextPort++);
       server.start();
+      server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        expect(mockLog.info).toHaveBeenCalledWith('HTTP API authentication enabled');
-        server.stop();
-        done();
-      }, 100);
+      expect(mockLog.warn).toHaveBeenCalledWith('HTTP API server is already running');
+      server.stop();
     });
   });
 
-  describe('POST /disarm endpoint', () => {
-    it('should successfully disarm without authentication', (done) => {
-      const server = new HttpApiServer(mockLog, 8584, undefined, mockDisarmCallback);
+  describe('alarm endpoints', () => {
+    it.each([
+      ['/disarm', 'Disarm command sent', 'disarm'],
+      ['/arm/away', 'Away arm command sent', 'away'],
+      ['/arm/night', 'Night arm command sent', 'night'],
+    ])('should handle POST %s with the correct callback', async (
+      path,
+      message,
+      selectedCallback,
+    ) => {
+      const port = nextPort++;
+      const server = createServer(port);
       server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8584,
-          path: '/disarm',
-          method: 'POST',
-        };
+      const result = await request(port, path);
 
-        const req = http.request(options, (res) => {
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            expect(res.statusCode).toBe(200);
-            expect(JSON.parse(data)).toEqual({
-              success: true,
-              message: 'Disarm command sent',
-            });
-            expect(mockDisarmCallback).toHaveBeenCalled();
-            expect(mockLog.info).toHaveBeenCalledWith('HTTP API: Disarm command received');
-            expect(mockLog.info).toHaveBeenCalledWith('HTTP API: Disarm command successful');
-            server.stop();
-            done();
-          });
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
+      expect(result.statusCode).toBe(200);
+      expect(result.headers['content-type']).toBe('application/json');
+      expect(result.body).toEqual({ success: true, message });
+      expect(mockDisarmCallback).toHaveBeenCalledTimes(selectedCallback === 'disarm' ? 1 : 0);
+      expect(mockArmAwayCallback).toHaveBeenCalledTimes(selectedCallback === 'away' ? 1 : 0);
+      expect(mockArmNightCallback).toHaveBeenCalledTimes(selectedCallback === 'night' ? 1 : 0);
+      server.stop();
     });
 
-    it('should successfully disarm with valid token', (done) => {
-      const server = new HttpApiServer(mockLog, 8585, 'valid-token', mockDisarmCallback);
+    it.each(['/disarm', '/arm/away', '/arm/night'])(
+      'should enforce authentication on %s',
+      async (path) => {
+        const port = nextPort++;
+        const server = createServer(port);
+        server.start();
+        await waitForListening();
+
+        const missing = await request(port, path, 'POST', '');
+        const invalid = await request(port, path, 'POST', 'invalid-token');
+
+        expect(missing.statusCode).toBe(401);
+        expect(missing.body).toEqual({ error: 'Unauthorized' });
+        expect(invalid.statusCode).toBe(401);
+        expect(mockDisarmCallback).not.toHaveBeenCalled();
+        expect(mockArmAwayCallback).not.toHaveBeenCalled();
+        expect(mockArmNightCallback).not.toHaveBeenCalled();
+        server.stop();
+      },
+    );
+
+    it.each([
+      ['/disarm', 'Failed to disarm alarm', 'disarm'],
+      ['/arm/away', 'Failed to arm away alarm', 'away'],
+      ['/arm/night', 'Failed to arm night alarm', 'night'],
+    ])('should return JSON 500 when %s fails', async (
+      path,
+      errorMessage,
+      failingCallback,
+    ) => {
+      const callback = failingCallback === 'disarm'
+        ? mockDisarmCallback
+        : failingCallback === 'away'
+          ? mockArmAwayCallback
+          : mockArmNightCallback;
+      callback.mockRejectedValueOnce(new Error('Somfy failed'));
+      const port = nextPort++;
+      const server = createServer(port);
       server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8585,
-          path: '/disarm',
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer valid-token',
-          },
-        };
+      const result = await request(port, path);
 
-        const req = http.request(options, (res) => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            expect(res.statusCode).toBe(200);
-            expect(mockDisarmCallback).toHaveBeenCalled();
-            server.stop();
-            done();
-          });
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
+      expect(result.statusCode).toBe(500);
+      expect(result.headers['content-type']).toBe('application/json');
+      expect(result.body).toEqual({ error: errorMessage });
+      server.stop();
     });
 
-    it('should reject request with invalid token', (done) => {
-      const server = new HttpApiServer(mockLog, 8586, 'valid-token', mockDisarmCallback);
+    it('should answer OPTIONS without triggering an alarm action', async () => {
+      const port = nextPort++;
+      const server = createServer(port);
       server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8586,
-          path: '/disarm',
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer invalid-token',
-          },
-        };
+      const result = await request(port, '/arm/away', 'OPTIONS', '');
 
-        const req = http.request(options, (res) => {
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            expect(res.statusCode).toBe(401);
-            expect(JSON.parse(data)).toEqual({ error: 'Unauthorized' });
-            expect(mockDisarmCallback).not.toHaveBeenCalled();
-            expect(mockLog.warn).toHaveBeenCalledWith('Unauthorized HTTP API request (invalid token)');
-            server.stop();
-            done();
-          });
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
+      expect(result.statusCode).toBe(200);
+      expect(result.headers['access-control-allow-origin']).toBe('*');
+      expect(result.headers['access-control-allow-methods']).toBe('POST, OPTIONS');
+      expect(mockDisarmCallback).not.toHaveBeenCalled();
+      expect(mockArmAwayCallback).not.toHaveBeenCalled();
+      expect(mockArmNightCallback).not.toHaveBeenCalled();
+      server.stop();
     });
 
-    it('should reject request without token when token is required', (done) => {
-      const server = new HttpApiServer(mockLog, 8587, 'required-token', mockDisarmCallback);
+    it('should return 404 for unknown endpoints', async () => {
+      const port = nextPort++;
+      const server = createServer(port);
       server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8587,
-          path: '/disarm',
-          method: 'POST',
-        };
+      const result = await request(port, '/unknown', 'POST', '');
 
-        const req = http.request(options, (res) => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            expect(res.statusCode).toBe(401);
-            expect(mockDisarmCallback).not.toHaveBeenCalled();
-            server.stop();
-            done();
-          });
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
+      expect(result.statusCode).toBe(404);
+      expect(result.body).toEqual({ error: 'Not found' });
+      server.stop();
     });
 
-    it('should handle disarm callback errors', (done) => {
-      const errorCallback = jest.fn().mockRejectedValue(new Error('Disarm failed'));
-      const server = new HttpApiServer(mockLog, 8588, undefined, errorCallback);
+    it('should return 404 for unsupported methods', async () => {
+      const port = nextPort++;
+      const server = createServer(port);
       server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8588,
-          path: '/disarm',
-          method: 'POST',
-        };
+      const result = await request(port, '/disarm', 'GET', '');
 
-        const req = http.request(options, (res) => {
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            expect(res.statusCode).toBe(500);
-            expect(JSON.parse(data)).toEqual({ error: 'Failed to disarm alarm' });
-            expect(mockLog.error).toHaveBeenCalledWith(
-              'HTTP API: Failed to disarm:',
-              expect.any(Error),
-            );
-            server.stop();
-            done();
-          });
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
-    });
-
-    it('should handle OPTIONS preflight requests', (done) => {
-      const server = new HttpApiServer(mockLog, 8589, undefined, mockDisarmCallback);
-      server.start();
-
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8589,
-          path: '/disarm',
-          method: 'OPTIONS',
-        };
-
-        const req = http.request(options, (res) => {
-          expect(res.statusCode).toBe(200);
-          expect(res.headers['access-control-allow-origin']).toBe('*');
-          expect(res.headers['access-control-allow-methods']).toBe('POST, OPTIONS');
-          server.stop();
-          done();
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
-    });
-
-    it('should return 404 for unknown endpoints', (done) => {
-      const server = new HttpApiServer(mockLog, 8590, undefined, mockDisarmCallback);
-      server.start();
-
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8590,
-          path: '/unknown',
-          method: 'POST',
-        };
-
-        const req = http.request(options, (res) => {
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            expect(res.statusCode).toBe(404);
-            expect(JSON.parse(data)).toEqual({ error: 'Not found' });
-            expect(mockDisarmCallback).not.toHaveBeenCalled();
-            server.stop();
-            done();
-          });
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
-    });
-
-    it('should return 404 for GET requests', (done) => {
-      const server = new HttpApiServer(mockLog, 8591, undefined, mockDisarmCallback);
-      server.start();
-
-      setTimeout(() => {
-        const options = {
-          hostname: 'localhost',
-          port: 8591,
-          path: '/disarm',
-          method: 'GET',
-        };
-
-        const req = http.request(options, (res) => {
-          expect(res.statusCode).toBe(404);
-          expect(mockDisarmCallback).not.toHaveBeenCalled();
-          server.stop();
-          done();
-        });
-
-        req.on('error', done);
-        req.end();
-      }, 100);
+      expect(result.statusCode).toBe(404);
+      server.stop();
     });
   });
 
   describe('stop', () => {
-    it('should stop the server', (done) => {
-      const server = new HttpApiServer(mockLog, 8592, undefined, mockDisarmCallback);
+    it('should stop the server', async () => {
+      const server = createServer(nextPort++);
       server.start();
+      await waitForListening();
 
-      setTimeout(() => {
-        server.stop();
-        expect(mockLog.info).toHaveBeenCalledWith('HTTP API server stopped');
-        done();
-      }, 100);
+      server.stop();
+
+      expect(mockLog.info).toHaveBeenCalledWith('HTTP API server stopped');
     });
 
     it('should handle stop when server is not running', () => {
-      const server = new HttpApiServer(mockLog, 8593, undefined, mockDisarmCallback);
-      server.stop(); // Should not throw
+      const server = createServer(nextPort++, undefined);
+      server.stop();
+
       expect(mockLog.info).not.toHaveBeenCalledWith('HTTP API server stopped');
     });
   });

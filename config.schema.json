@@ -84,12 +84,6 @@
           "suffix": "ms"
         }
       },
-      "debug": {
-        "title": "Debug Logging",
-        "type": "boolean",
-        "default": false,
-        "description": "Enable debug logging for troubleshooting"
-      },
       "httpPort": {
         "title": "🌐 HTTP API Port",
         "type": "integer",
@@ -101,10 +95,34 @@
       "httpToken": {
         "title": "🔒 HTTP API Token",
         "type": "string",
-        "placeholder": "Strongly recommended security token",
-        "description": "Token for securing the HTTP API. If set, requests must include an 'Authorization: Bearer YOUR_TOKEN' header. Without it, anyone who can reach the port can disarm your alarm."
+        "minLength": 1,
+        "placeholder": "Required when HTTP API is enabled",
+        "description": "Required when HTTP API Port is non-zero. Requests must include an 'Authorization: Bearer YOUR_TOKEN' header."
+      },
+      "httpHost": {
+        "title": "HTTP API Bind Address",
+        "type": "string",
+        "minLength": 1,
+        "default": "127.0.0.1",
+        "placeholder": "127.0.0.1",
+        "description": "Network address for the HTTP API. Keep 127.0.0.1 for same-host integrations. Use 0.0.0.0 only when LAN access is required."
       }
-    }
+    },
+    "allOf": [
+      {
+        "if": {
+          "required": ["httpPort"],
+          "properties": {
+            "httpPort": {
+              "minimum": 1
+            }
+          }
+        },
+        "then": {
+          "required": ["httpToken"]
+        }
+      }
+    ]
   },
   "layout": [
     {
@@ -128,8 +146,7 @@
         "pollingInterval",
         "adaptivePolling",
         "fastPollingInterval",
-        "fastPollingDuration",
-        "debug"
+        "fastPollingDuration"
       ]
     },
     {
@@ -139,7 +156,8 @@
       "expanded": false,
       "items": [
         "httpPort",
-        "httpToken"
+        "httpToken",
+        "httpHost"
       ]
     }
   ]

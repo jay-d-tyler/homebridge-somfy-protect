@@ -72,6 +72,7 @@ describe('SomfyProtectAlarmAccessory', () => {
       events: new EventEmitter(),
       // 10s interval -> 90s staleness threshold (the Math.max floor)
       getNormalPollingInterval: jest.fn().mockReturnValue(10000),
+      requestFastPolling: jest.fn(),
       homebridgeApi: {
         hap: {
           HapStatusError: class HapStatusError extends Error {
@@ -94,7 +95,7 @@ describe('SomfyProtectAlarmAccessory', () => {
 
     mockAccessory = {
       context: {
-        site: mockSite,
+        site: { ...mockSite, security_level: 'disarmed' },
         lastUpdate: Date.now(),
       },
       getService: jest.fn((service) => {
@@ -125,7 +126,7 @@ describe('SomfyProtectAlarmAccessory', () => {
       );
       expect(infoService?.setCharacteristic).toHaveBeenCalledWith(
         mockCharacteristic.FirmwareRevision,
-        '2.0.0',
+        '2.3.0',
       );
     });
 
@@ -175,6 +176,16 @@ describe('SomfyProtectAlarmAccessory', () => {
       const state = await accessory.getCurrentState();
       expect(state).toBe(mockCharacteristic.SecuritySystemCurrentState.DISARMED);
     });
+
+    it('should fail closed for an unknown current security level', async () => {
+      mockAccessory.context.site.security_level = 'unknown';
+
+      await expect(accessory.getCurrentState()).rejects.toThrow();
+      expect(mockPlatform.log.error).toHaveBeenCalledWith(
+        'Error getting current state:',
+        'Unknown security level: unknown',
+      );
+    });
   });
 
   describe('getCurrentState', () => {
@@ -215,6 +226,16 @@ describe('SomfyProtectAlarmAccessory', () => {
 
       expect(state).toBe(mockCharacteristic.SecuritySystemTargetState.STAY_ARM);
     });
+
+    it('should fail closed for an unknown target security level', async () => {
+      mockAccessory.context.site.security_level = 'unknown';
+
+      await expect(accessory.getTargetState()).rejects.toThrow();
+      expect(mockPlatform.log.error).toHaveBeenCalledWith(
+        'Error getting target state:',
+        expect.objectContaining({ message: 'Unknown security level: unknown' }),
+      );
+    });
   });
 
   describe('setTargetState', () => {
@@ -225,11 +246,16 @@ describe('SomfyProtectAlarmAccessory', () => {
 
       expect(mockApi.setSecurityLevel).toHaveBeenCalledWith('test-site-id', 'armed');
       expect(mockService.updateCharacteristic).toHaveBeenCalledWith(
-        mockCharacteristic.SecuritySystemCurrentState,
-        mockCharacteristic.SecuritySystemCurrentState.AWAY_ARM,
+        mockCharacteristic.SecuritySystemTargetState,
+        mockCharacteristic.SecuritySystemTargetState.AWAY_ARM,
       );
+      expect(mockAccessory.context.site.security_level).toBe('disarmed');
       expect(mockPlatform.log.info).toHaveBeenCalledWith(
         expect.stringContaining('Successfully set'),
+      );
+      expect(mockPlatform.requestFastPolling).toHaveBeenCalledWith(
+        'test-site-id',
+        'armed',
       );
     });
 
@@ -258,6 +284,18 @@ describe('SomfyProtectAlarmAccessory', () => {
       expect(mockService.updateCharacteristic).toHaveBeenCalledWith(
         mockCharacteristic.SecuritySystemTargetState,
         expect.any(Number),
+      );
+    });
+
+    it('should reject unsupported HomeKit states without disarming', async () => {
+      const unsupportedState = mockCharacteristic.SecuritySystemTargetState.NIGHT_ARM;
+
+      await expect(accessory.setTargetState(unsupportedState)).rejects.toThrow();
+
+      expect(mockApi.setSecurityLevel).not.toHaveBeenCalled();
+      expect(mockPlatform.log.error).toHaveBeenCalledWith(
+        'Error setting target state:',
+        'Unknown target state: 2',
       );
     });
   });
@@ -322,6 +360,27 @@ describe('SomfyProtectAlarmAccessory', () => {
       expect(mockService.updateCharacteristic).toHaveBeenCalledWith(
         mockCharacteristic.StatusFault,
         mockCharacteristic.StatusFault.NO_FAULT,
+      );
+    });
+
+    it('should keep a pending target separate from the observed current state', async () => {
+      mockPlatform.events.emit(
+        'siteUpdated',
+        'test-site-id',
+        mockSite,
+        'armed',
+      );
+
+      expect(mockService.updateCharacteristic).toHaveBeenCalledWith(
+        mockCharacteristic.SecuritySystemCurrentState,
+        mockCharacteristic.SecuritySystemCurrentState.DISARMED,
+      );
+      expect(mockService.updateCharacteristic).toHaveBeenCalledWith(
+        mockCharacteristic.SecuritySystemTargetState,
+        mockCharacteristic.SecuritySystemTargetState.AWAY_ARM,
+      );
+      await expect(accessory.getTargetState()).resolves.toBe(
+        mockCharacteristic.SecuritySystemTargetState.AWAY_ARM,
       );
     });
   });

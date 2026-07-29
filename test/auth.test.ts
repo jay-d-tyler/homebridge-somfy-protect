@@ -17,6 +17,11 @@ describe('SomfyProtectAuth', () => {
   const storagePath = '/test/storage';
   const username = 'test@example.com';
   const password = 'test-password';
+  const serializeStoredToken = (token: object, storedUsername = username) => JSON.stringify({
+    version: 1,
+    username: storedUsername,
+    token,
+  });
 
   beforeEach(() => {
     // Reset implementations too — mockReturnValue(...) set in one test must not
@@ -52,6 +57,7 @@ describe('SomfyProtectAuth', () => {
     it('should initialize with correct parameters', () => {
       expect(mockedAxios.create).toHaveBeenCalledWith(
         expect.objectContaining({
+          timeout: 30000,
           headers: expect.objectContaining({
             'User-Agent': 'Homebridge-Somfy-Protect',
           }),
@@ -103,7 +109,7 @@ describe('SomfyProtectAuth', () => {
       };
 
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readFileSync.mockReturnValue(JSON.stringify(cachedToken));
+      mockedFs.readFileSync.mockReturnValue(serializeStoredToken(cachedToken));
 
       // Create new instance to trigger token loading
       auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
@@ -134,7 +140,7 @@ describe('SomfyProtectAuth', () => {
       };
 
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readFileSync.mockReturnValue(JSON.stringify(expiredToken));
+      mockedFs.readFileSync.mockReturnValue(serializeStoredToken(expiredToken));
 
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post.mockResolvedValueOnce({ data: newToken });
@@ -189,7 +195,7 @@ describe('SomfyProtectAuth', () => {
       };
 
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readFileSync.mockReturnValue(JSON.stringify(expiredToken));
+      mockedFs.readFileSync.mockReturnValue(serializeStoredToken(expiredToken));
 
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post
@@ -206,6 +212,107 @@ describe('SomfyProtectAuth', () => {
       expect(token).toBe('new-token');
       expect(mockLogger.warn).toHaveBeenCalledWith(
         'Token refresh failed, requesting new token',
+      );
+    });
+
+    it('should ignore a valid cached token belonging to a different account', async () => {
+      const cachedToken = {
+        access_token: 'other-account-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'all',
+        refresh_token: 'other-account-refresh',
+        issuedAt: Date.now(),
+      };
+      const newToken = {
+        access_token: 'correct-account-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'all',
+        refresh_token: 'correct-account-refresh',
+      };
+
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readFileSync.mockReturnValue(serializeStoredToken(cachedToken, 'other@example.com'));
+      const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
+      mockAxiosInstance.post.mockResolvedValueOnce({ data: newToken });
+
+      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+
+      await expect(auth.getAccessToken()).resolves.toBe('correct-account-token');
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '',
+        expect.stringContaining('grant_type=password'),
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Ignoring cached authentication token for a different account',
+      );
+    });
+
+    it('should ignore legacy unscoped token files', async () => {
+      const legacyToken = {
+        access_token: 'legacy-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'all',
+        refresh_token: 'legacy-refresh',
+        issuedAt: Date.now(),
+      };
+      const newToken = {
+        access_token: 'new-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'all',
+        refresh_token: 'new-refresh',
+      };
+
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readFileSync.mockReturnValue(JSON.stringify(legacyToken));
+      const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
+      mockAxiosInstance.post.mockResolvedValueOnce({ data: newToken });
+
+      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+
+      await expect(auth.getAccessToken()).resolves.toBe('new-token');
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Ignoring legacy or invalid cached authentication token',
+      );
+    });
+
+    it('should share one token request across concurrent callers', async () => {
+      const mockToken = {
+        access_token: 'shared-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        refresh_token: 'shared-refresh',
+      };
+      let resolveToken!: (value: { data: typeof mockToken }) => void;
+      const tokenResponse = new Promise<{ data: typeof mockToken }>((resolve) => {
+        resolveToken = resolve;
+      });
+      const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
+      mockAxiosInstance.post.mockReturnValue(tokenResponse);
+
+      const first = auth.getAccessToken();
+      const second = auth.getAccessToken();
+      expect(mockAxiosInstance.post).toHaveBeenCalledTimes(1);
+
+      resolveToken({ data: mockToken });
+      await expect(Promise.all([first, second])).resolves.toEqual([
+        'shared-token',
+        'shared-token',
+      ]);
+      expect(mockAxiosInstance.post).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reject malformed token responses', async () => {
+      const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
+      mockAxiosInstance.post.mockResolvedValueOnce({
+        data: { expires_in: 3600, token_type: 'Bearer' },
+      });
+
+      await expect(auth.getAccessToken()).rejects.toThrow(
+        'Authentication server returned an invalid token response',
       );
     });
   });
@@ -230,7 +337,7 @@ describe('SomfyProtectAuth', () => {
       };
 
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readFileSync.mockReturnValue(JSON.stringify(currentToken));
+      mockedFs.readFileSync.mockReturnValue(serializeStoredToken(currentToken));
 
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post.mockResolvedValueOnce({ data: refreshedToken });
@@ -244,6 +351,33 @@ describe('SomfyProtectAuth', () => {
         expect.stringContaining('grant_type=refresh_token'),
       );
       expect(mockLogger.debug).toHaveBeenCalledWith('Forcing token refresh');
+    });
+
+    it('should preserve the existing refresh token when rotation omits one', async () => {
+      const currentToken = {
+        access_token: 'current-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'all',
+        refresh_token: 'keep-this-refresh-token',
+        issuedAt: Date.now(),
+      };
+      const refreshedToken = {
+        access_token: 'refreshed-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'all',
+      };
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readFileSync.mockReturnValue(serializeStoredToken(currentToken));
+      const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
+      mockAxiosInstance.post.mockResolvedValueOnce({ data: refreshedToken });
+      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+
+      await auth.forceRefresh();
+
+      const persistedToken = String((mockedFs.writeFileSync as jest.Mock).mock.calls[0][1]);
+      expect(persistedToken).toContain('"refresh_token": "keep-this-refresh-token"');
     });
   });
 
@@ -302,10 +436,28 @@ describe('SomfyProtectAuth', () => {
 
       await auth.getAccessToken();
 
+      const temporaryTokenPath = path.join(
+        storagePath,
+        `somfy-protect-token.json.${process.pid}.tmp`,
+      );
       expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
-        path.join(storagePath, 'somfy-protect-token.json'),
-        expect.stringContaining('test-token'),
+        temporaryTokenPath,
+        expect.stringContaining('"username": "test@example.com"'),
         { mode: 0o600 },
+      );
+      expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
+        temporaryTokenPath,
+        expect.stringContaining('"access_token": "test-token"'),
+        { mode: 0o600 },
+      );
+      expect(mockedFs.renameSync).toHaveBeenCalledWith(
+        temporaryTokenPath,
+        path.join(storagePath, 'somfy-protect-token.json'),
+      );
+      expect(mockedFs.chmodSync).toHaveBeenCalledWith(temporaryTokenPath, 0o600);
+      expect(mockedFs.chmodSync).toHaveBeenCalledWith(
+        path.join(storagePath, 'somfy-protect-token.json'),
+        0o600,
       );
       expect(mockLogger.debug).toHaveBeenCalledWith('Saved authentication token to cache');
     });

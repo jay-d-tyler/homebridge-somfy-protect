@@ -3,13 +3,24 @@ import axios, { type AxiosInstance } from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { API_CONFIG } from './settings.js';
-import { type OAuthToken, SomfyProtectApiError } from './types.js';
+import {
+  type OAuthToken,
+  type OAuthTokenResponse,
+  SomfyProtectApiError,
+} from './types.js';
+
+interface StoredOAuthToken {
+  version: 1;
+  username: string;
+  token: OAuthToken;
+}
 
 /**
  * Handles authentication and token management for Somfy Protect API
  */
 export class SomfyProtectAuth {
   private token: OAuthToken | null = null;
+  private tokenRefreshPromise?: Promise<OAuthToken>;
   private readonly tokenPath: string;
   private readonly axios: AxiosInstance;
 
@@ -22,6 +33,7 @@ export class SomfyProtectAuth {
     this.tokenPath = path.join(storagePath, 'somfy-protect-token.json');
     this.axios = axios.create({
       baseURL: API_CONFIG.TOKEN_URL,
+      timeout: API_CONFIG.REQUEST_TIMEOUT,
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'Homebridge-Somfy-Protect',
@@ -39,7 +51,19 @@ export class SomfyProtectAuth {
     try {
       if (fs.existsSync(this.tokenPath)) {
         const data = fs.readFileSync(this.tokenPath, 'utf-8');
-        this.token = JSON.parse(data);
+        const storedToken = JSON.parse(data) as unknown;
+
+        if (!this.isStoredToken(storedToken)) {
+          this.log.info('Ignoring legacy or invalid cached authentication token');
+          return;
+        }
+
+        if (storedToken.username !== this.normalizedUsername) {
+          this.log.info('Ignoring cached authentication token for a different account');
+          return;
+        }
+
+        this.token = storedToken.token;
         this.log.debug('Loaded cached authentication token');
       }
     } catch (error) {
@@ -51,19 +75,80 @@ export class SomfyProtectAuth {
   /**
    * Save token to persistent storage
    */
-  private saveToken(): void {
+  private saveToken(token: OAuthToken): void {
+    const temporaryTokenPath = `${this.tokenPath}.${process.pid}.tmp`;
     try {
       const dir = path.dirname(this.tokenPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      // 0600 — the file holds live credentials for the alarm system
-      fs.writeFileSync(this.tokenPath, JSON.stringify(this.token, null, 2), { mode: 0o600 });
+      const storedToken: StoredOAuthToken = {
+        version: 1,
+        username: this.normalizedUsername,
+        token,
+      };
+      // Write beside the destination and rename atomically so a crash cannot
+      // leave a truncated credential file.
+      fs.writeFileSync(temporaryTokenPath, JSON.stringify(storedToken, null, 2), { mode: 0o600 });
+      fs.chmodSync(temporaryTokenPath, 0o600);
+      fs.renameSync(temporaryTokenPath, this.tokenPath);
       fs.chmodSync(this.tokenPath, 0o600);
       this.log.debug('Saved authentication token to cache');
     } catch (error) {
       this.log.error('Failed to save token:', error);
     }
+  }
+
+  private get normalizedUsername(): string {
+    return this.username.trim().toLowerCase();
+  }
+
+  private isStoredToken(value: unknown): value is StoredOAuthToken {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const stored = value as Partial<StoredOAuthToken>;
+    const token = stored.token as Partial<OAuthToken> | undefined;
+
+    return stored.version === 1
+      && typeof stored.username === 'string'
+      && !!token
+      && typeof token.access_token === 'string'
+      && token.access_token.length > 0
+      && typeof token.expires_in === 'number'
+      && Number.isFinite(token.expires_in)
+      && token.expires_in > 0
+      && typeof token.token_type === 'string'
+      && token.token_type.length > 0
+      && (token.scope === undefined || typeof token.scope === 'string')
+      && (token.refresh_token === undefined || typeof token.refresh_token === 'string')
+      && typeof token.issuedAt === 'number'
+      && Number.isFinite(token.issuedAt);
+  }
+
+  private createToken(
+    response: OAuthTokenResponse,
+    fallbackRefreshToken?: string,
+  ): OAuthToken {
+    if (
+      !response
+      || typeof response.access_token !== 'string'
+      || !response.access_token
+      || typeof response.expires_in !== 'number'
+      || !Number.isFinite(response.expires_in)
+      || response.expires_in <= 0
+      || typeof response.token_type !== 'string'
+      || !response.token_type
+    ) {
+      throw new SomfyProtectApiError('Authentication server returned an invalid token response');
+    }
+
+    return {
+      ...response,
+      refresh_token: response.refresh_token || fallbackRefreshToken,
+      issuedAt: Date.now(),
+    };
   }
 
   /**
@@ -94,14 +179,11 @@ export class SomfyProtectAuth {
         password: this.password,
       });
 
-      const response = await this.axios.post<OAuthToken>('', params.toString());
-      const token: OAuthToken = {
-        ...response.data,
-        issuedAt: Date.now(),
-      };
+      const response = await this.axios.post<OAuthTokenResponse>('', params.toString());
+      const token = this.createToken(response.data);
 
       this.token = token;
-      this.saveToken();
+      this.saveToken(token);
       this.log.info('Successfully authenticated with Somfy Protect');
       return token;
     } catch (error) {
@@ -137,14 +219,12 @@ export class SomfyProtectAuth {
         refresh_token: this.token.refresh_token,
       });
 
-      const response = await this.axios.post<OAuthToken>('', params.toString());
-      const token: OAuthToken = {
-        ...response.data,
-        issuedAt: Date.now(),
-      };
+      const existingRefreshToken = this.token.refresh_token;
+      const response = await this.axios.post<OAuthTokenResponse>('', params.toString());
+      const token = this.createToken(response.data, existingRefreshToken);
 
       this.token = token;
-      this.saveToken();
+      this.saveToken(token);
       this.log.debug('Successfully refreshed access token');
       return token;
     } catch (error) {
@@ -171,11 +251,7 @@ export class SomfyProtectAuth {
    */
   public async getAccessToken(): Promise<string> {
     if (!this.token || this.isTokenExpired()) {
-      if (this.token?.refresh_token) {
-        await this.refreshToken();
-      } else {
-        await this.requestNewToken();
-      }
+      await this.refreshAccessToken();
     }
 
     if (!this.token) {
@@ -190,11 +266,24 @@ export class SomfyProtectAuth {
    */
   public async forceRefresh(): Promise<void> {
     this.log.debug('Forcing token refresh');
-    if (this.token?.refresh_token) {
-      await this.refreshToken();
-    } else {
-      await this.requestNewToken();
+    await this.refreshAccessToken();
+  }
+
+  private refreshAccessToken(): Promise<OAuthToken> {
+    if (!this.tokenRefreshPromise) {
+      this.tokenRefreshPromise = (async () => {
+        try {
+          if (this.token?.refresh_token) {
+            return await this.refreshToken();
+          }
+          return await this.requestNewToken();
+        } finally {
+          this.tokenRefreshPromise = undefined;
+        }
+      })();
     }
+
+    return this.tokenRefreshPromise;
   }
 
   /**

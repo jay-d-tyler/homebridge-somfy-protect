@@ -1,14 +1,27 @@
 import { SomfyProtectApi } from '../src/api.js';
 import { SomfyProtectAuth } from '../src/auth.js';
 import axios from 'axios';
+import axiosRetry from 'axios-retry';
 import type { Logging } from 'homebridge';
-import type { Site, Device } from '../src/types.js';
+import type { Site } from '../src/types.js';
 
 // Mock dependencies
 jest.mock('axios');
+jest.mock('axios-retry', () => {
+  const retry = jest.fn();
+  Object.assign(retry, {
+    isIdempotentRequestError: jest.fn(),
+  });
+  return {
+    __esModule: true,
+    default: retry,
+  };
+});
 jest.mock('../src/auth.js');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
+const mockedAxiosRetry = jest.mocked(axiosRetry);
+const mockedIsIdempotentRequestError = jest.mocked(axiosRetry.isIdempotentRequestError);
 
 describe('SomfyProtectApi', () => {
   let api: SomfyProtectApi;
@@ -35,6 +48,7 @@ describe('SomfyProtectApi', () => {
       get: jest.fn(),
       post: jest.fn(),
       put: jest.fn(),
+      request: jest.fn(),
       interceptors: {
         request: { use: jest.fn() },
         response: { use: jest.fn() },
@@ -42,12 +56,12 @@ describe('SomfyProtectApi', () => {
     };
 
     mockedAxios.create = jest.fn().mockReturnValue(mockAxiosInstance);
+    mockedIsIdempotentRequestError.mockReturnValue(false);
 
     // Mock auth
     mockAuth = {
       getAccessToken: jest.fn().mockResolvedValue('mock-access-token'),
       forceRefresh: jest.fn(),
-      clearToken: jest.fn(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
@@ -70,8 +84,66 @@ describe('SomfyProtectApi', () => {
     });
 
     it('should configure retry logic', () => {
+      expect(mockedAxiosRetry).toHaveBeenCalledWith(
+        mockAxiosInstance,
+        expect.objectContaining({
+          retries: 3,
+          retryCondition: expect.any(Function),
+        }),
+      );
       expect(mockAxiosInstance.interceptors.request.use).toHaveBeenCalled();
       expect(mockAxiosInstance.interceptors.response.use).toHaveBeenCalled();
+    });
+
+    it('should delegate retries to the idempotent-request policy', () => {
+      const retryOptions = mockedAxiosRetry.mock.calls[0][1]!;
+      const error = {
+        config: { method: 'post' },
+        response: { status: 500 },
+      };
+
+      mockedIsIdempotentRequestError.mockReturnValue(false);
+      expect(retryOptions.retryCondition!(error as never)).toBe(false);
+
+      mockedIsIdempotentRequestError.mockReturnValue(true);
+      expect(retryOptions.retryCondition!(error as never)).toBe(true);
+      expect(mockedIsIdempotentRequestError).toHaveBeenCalledWith(error);
+    });
+
+    it('should add a bearer token in the request interceptor', async () => {
+      const requestHandler = mockAxiosInstance.interceptors.request.use.mock.calls[0][0];
+      const config = { headers: {} };
+
+      await expect(requestHandler(config)).resolves.toBe(config);
+      expect(config.headers).toEqual({ Authorization: 'Bearer mock-access-token' });
+    });
+
+    it('should retry a 401 only once after refreshing the token', async () => {
+      const responseErrorHandler = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
+      const config = { headers: {} };
+      const retriedResponse = { data: { ok: true } };
+      mockedAxios.isAxiosError.mockReturnValue(true);
+      mockAuth.getAccessToken.mockResolvedValue('refreshed-access-token');
+      mockAxiosInstance.request.mockResolvedValue(retriedResponse);
+
+      await expect(responseErrorHandler({
+        config,
+        response: { status: 401, data: {} },
+        message: 'Unauthorized',
+      })).resolves.toBe(retriedResponse);
+
+      expect(mockAuth.forceRefresh).toHaveBeenCalledTimes(1);
+      expect(config).toEqual({
+        headers: { Authorization: 'Bearer refreshed-access-token' },
+        _authRetried: true,
+      });
+
+      await expect(responseErrorHandler({
+        config,
+        response: { status: 401, data: {} },
+        message: 'Still unauthorized',
+      })).rejects.toThrow('Still unauthorized');
+      expect(mockAuth.forceRefresh).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -114,6 +186,30 @@ describe('SomfyProtectApi', () => {
         expect.any(Error),
       );
     });
+
+    it('should reject malformed site collections', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: { items: null },
+      });
+
+      await expect(api.getSites()).rejects.toThrow('invalid sites response');
+    });
+
+    it('should reject unknown security levels in site collections', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          items: [{
+            site_id: 'site-1',
+            name: 'Home',
+            label: 'Home',
+            brand: 'somfy',
+            security_level: 'mystery',
+          }],
+        },
+      });
+
+      await expect(api.getSites()).rejects.toThrow('unknown security level');
+    });
   });
 
   describe('getSite', () => {
@@ -135,6 +231,28 @@ describe('SomfyProtectApi', () => {
       expect(site).toEqual(mockSite);
       expect(mockAxiosInstance.get).toHaveBeenCalledWith('/v3/site/site-1');
       expect(mockLogger.debug).toHaveBeenCalledWith('Fetching site site-1');
+    });
+
+    it('should reject an unknown security level', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          site_id: 'site-1',
+          name: 'Home',
+          label: 'Home',
+          brand: 'somfy',
+          security_level: 'unknown',
+        },
+      });
+
+      await expect(api.getSite('site-1')).rejects.toThrow('unknown security level');
+    });
+
+    it('should reject a malformed site object', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: null,
+      });
+
+      await expect(api.getSite('site-1')).rejects.toThrow('invalid site response');
     });
   });
 
@@ -199,126 +317,4 @@ describe('SomfyProtectApi', () => {
     });
   });
 
-  describe('stopAlarm', () => {
-    it('should stop alarm successfully', async () => {
-      mockAxiosInstance.put.mockResolvedValueOnce({ data: {} });
-
-      await api.stopAlarm('site-1');
-
-      expect(mockAxiosInstance.put).toHaveBeenCalledWith(
-        '/v3/site/site-1/alarm/stop',
-        {},
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith('Stopping alarm for site site-1');
-    });
-
-    it('should handle errors when stopping alarm', async () => {
-      mockAxiosInstance.put.mockRejectedValueOnce(new Error('Stop failed'));
-
-      await expect(api.stopAlarm('site-1')).rejects.toThrow('Stop failed');
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Failed to stop alarm for site site-1:',
-        expect.any(Error),
-      );
-    });
-  });
-
-  describe('triggerPanic', () => {
-    it('should trigger panic alarm', async () => {
-      mockAxiosInstance.post.mockResolvedValueOnce({ data: {} });
-
-      await api.triggerPanic('site-1', 'alarm');
-
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
-        '/v3/site/site-1/panic',
-        { type: 'alarm' },
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith('Triggering alarm panic for site site-1');
-    });
-
-    it('should trigger silent panic', async () => {
-      mockAxiosInstance.post.mockResolvedValueOnce({ data: {} });
-
-      await api.triggerPanic('site-1', 'silent');
-
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
-        '/v3/site/site-1/panic',
-        { type: 'silent' },
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith('Triggering silent panic for site site-1');
-    });
-
-    it('should default to alarm mode if not specified', async () => {
-      mockAxiosInstance.post.mockResolvedValueOnce({ data: {} });
-
-      await api.triggerPanic('site-1');
-
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
-        '/v3/site/site-1/panic',
-        { type: 'alarm' },
-      );
-    });
-  });
-
-  describe('getDevices', () => {
-    it('should fetch all devices for a site', async () => {
-      const mockDevices: Device[] = [
-        {
-          device_id: 'device-1',
-          site_id: 'site-1',
-          box_id: 'box-1',
-          label: 'Motion Sensor',
-          device_definition: {
-            device_definition_id: 'def-1',
-            type: 'pir',
-            label: 'PIR',
-          },
-        },
-      ];
-
-      mockAxiosInstance.get.mockResolvedValueOnce({
-        data: { items: mockDevices },
-      });
-
-      const devices = await api.getDevices('site-1');
-
-      expect(devices).toEqual(mockDevices);
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/v3/site/site-1/device');
-      expect(mockLogger.debug).toHaveBeenCalledWith('Fetching devices for site site-1');
-    });
-  });
-
-  describe('getDevice', () => {
-    it('should fetch specific device', async () => {
-      const mockDevice: Device = {
-        device_id: 'device-1',
-        site_id: 'site-1',
-        box_id: 'box-1',
-        label: 'Camera',
-        device_definition: {
-          device_definition_id: 'def-1',
-          type: 'indoor_camera',
-          label: 'Indoor Camera',
-        },
-      };
-
-      mockAxiosInstance.get.mockResolvedValueOnce({
-        data: mockDevice,
-      });
-
-      const device = await api.getDevice('site-1', 'device-1');
-
-      expect(device).toEqual(mockDevice);
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/v3/site/site-1/device/device-1');
-      expect(mockLogger.debug).toHaveBeenCalledWith('Fetching device device-1 for site site-1');
-    });
-  });
-
-  describe('clearAuthToken', () => {
-    it('should clear authentication token', () => {
-      api.clearAuthToken();
-
-      expect(mockAuth.clearToken).toHaveBeenCalled();
-    });
-  });
 });
