@@ -10,7 +10,7 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 ✨ **Modern & Reliable**
 - Built from scratch with latest Homebridge best practices
 - Modern TypeScript with full type safety
-- Async/await throughout (no callbacks)
+- Promise-based API and lifecycle handling
 - Automatic token refresh with persistence
 - Robust error handling with retry logic
 - Comprehensive logging
@@ -18,12 +18,13 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 🔐 **Security Features**
 - Expose Somfy Protect alarm to HomeKit
 - Arm (Away), Arm (Stay/Partial), and Disarm modes
-- Real-time status updates via polling
+- Responsive status updates via adaptive polling
 - Automatic state synchronization
 
 🚀 **Smart Polling**
-- Configurable polling interval (5-60 seconds)
-- Automatic retry on failure with exponential backoff
+- Adaptive polling: fast (1s) updates right after a state change, slow (60s) when stable
+- Configurable polling intervals (5-300 seconds)
+- Bounded retries with backoff and jitter
 - Efficient token caching between restarts
 
 🏠 **Multi-Site Support**
@@ -34,7 +35,7 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 🌐 **HTTP API for Automation**
 - Optional HTTP server for integration with automation systems
 - Secure token-based authentication
-- Trigger disarm actions from virtual switches or webhooks
+- Trigger Away, Night/Partial, and Disarm actions from virtual switches or webhooks
 - Perfect for complex automation scenarios
 
 ## Installation
@@ -48,17 +49,17 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 
 ### Manual Installation
 
-\`\`\`bash
+```bash
 npm install -g @jay-d-tyler/homebridge-somfy-protect
-\`\`\`
+```
 
 ## Configuration
 
-Configure the plugin through the Homebridge Config UI X interface, or manually edit your \`config.json\`:
+Configure the plugin through the Homebridge Config UI X interface, or manually edit your `config.json`:
 
 ### Minimum Configuration
 
-\`\`\`json
+```json
 {
   "platforms": [
     {
@@ -69,11 +70,11 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
     }
   ]
 }
-\`\`\`
+```
 
 ### Full Configuration
 
-\`\`\`json
+```json
 {
   "platforms": [
     {
@@ -82,41 +83,47 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
       "username": "your.email@example.com",
       "password": "your-password",
       "siteId": "your-site-id-if-multiple-sites",
-      "pollingInterval": 10000,
-      "debug": false,
-      "httpPort": 8581,
-      "httpToken": "your-secret-token"
+      "pollingInterval": 60000,
+      "adaptivePolling": true,
+      "fastPollingInterval": 1000,
+      "fastPollingDuration": 60000,
+      "httpPort": 8582,
+      "httpToken": "your-secret-token",
+      "httpHost": "127.0.0.1"
     }
   ]
 }
-\`\`\`
+```
 
 ### Configuration Options
 
 | Option | Required | Default | Description |
 |--------|----------|---------|-------------|
-| \`platform\` | Yes | - | Must be \`SomfyProtect\` |
-| \`name\` | No | "Somfy Protect" | Name shown in Homebridge logs |
-| \`username\` | Yes | - | Your Somfy Protect account email |
-| \`password\` | Yes | - | Your Somfy Protect account password |
-| \`siteId\` | No | (first site) | Specific site ID if you have multiple homes |
-| \`pollingInterval\` | No | 10000 | Status update interval in milliseconds (5000-60000) |
-| \`debug\` | No | false | Enable debug logging |
-| \`httpPort\` | No | 8581 | Port for HTTP API server (set to 0 to disable) |
-| \`httpToken\` | No | - | Optional security token for HTTP API |
+| `platform` | Yes | - | Must be `SomfyProtect` |
+| `name` | No | "Somfy Protect" | Name shown in Homebridge logs |
+| `username` | Yes | - | Your Somfy Protect account email |
+| `password` | Yes | - | Your Somfy Protect account password |
+| `siteId` | No | (first site) | Specific site ID if you have multiple homes |
+| `pollingInterval` | No | 60000 | Normal status update interval in milliseconds (5000-300000) |
+| `adaptivePolling` | No | true | Poll faster right after a state change, then slow back down |
+| `fastPollingInterval` | No | 1000 | Poll interval after a state change in milliseconds (1000-10000) |
+| `fastPollingDuration` | No | 60000 | How long to fast-poll after a state change in milliseconds |
+| `httpPort` | No | 0 (disabled) | Port for HTTP API server; avoid 8581, which the Homebridge UI uses |
+| `httpToken` | When HTTP API enabled | - | Required Bearer token when `httpPort` is non-zero |
+| `httpHost` | No | 127.0.0.1 | Bind address for the HTTP API; use `0.0.0.0` only when LAN access is required |
 
 ## Finding Your Site ID
 
 If you have multiple Somfy Protect sites (homes) on your account:
 
-1. Start Homebridge with this plugin configured (without \`siteId\`)
+1. Start Homebridge with this plugin configured (without `siteId`)
 2. Check the Homebridge logs
 3. You'll see a message like:
-   \`\`\`
+   ```
    Multiple sites detected. Add "siteId" to config to select a specific site:
      - Home: abc123-site-id
      - Vacation Home: xyz789-site-id
-   \`\`\`
+   ```
 4. Copy the site ID you want to use into your config
 
 ## HTTP API for Automation
@@ -125,64 +132,78 @@ The plugin includes an optional HTTP API server that allows other automation sys
 
 ### Enabling the HTTP API
 
-Add \`httpPort\` to your configuration:
+Add `httpPort` to your configuration:
 
-\`\`\`json
+```json
 {
   "platform": "SomfyProtect",
   "username": "your.email@example.com",
   "password": "your-password",
-  "httpPort": 8581,
-  "httpToken": "your-secret-token"
+  "httpPort": 8582,
+  "httpToken": "your-secret-token",
+  "httpHost": "127.0.0.1"
 }
-\`\`\`
+```
 
-- **httpPort**: Port number for the API server (default: 8581, set to 0 to disable)
-- **httpToken**: Optional security token (highly recommended)
+- **httpPort**: Port number for the API server (default: 0 = disabled). Avoid 8581 — the Homebridge UI usually runs there.
+- **httpToken**: Required security token. The HTTP API refuses to start without it.
+- **httpHost**: Bind address (default: `127.0.0.1`, accessible only from the Homebridge host). Set `0.0.0.0` only for integrations running elsewhere on your LAN.
 
 ### Using the HTTP API
 
-#### Disarm All Alarms
+Every endpoint requires the configured Bearer token.
 
-\`\`\`bash
-# Without authentication
-curl -X POST http://localhost:8581/disarm
-
-# With authentication token
-curl -X POST http://localhost:8581/disarm \\
+```bash
+# Disarm all alarms
+curl -X POST http://localhost:8582/disarm \
   -H "Authorization: Bearer your-secret-token"
-\`\`\`
 
-**Response:**
-\`\`\`json
+# Arm Away
+curl -X POST http://localhost:8582/arm/away \
+  -H "Authorization: Bearer your-secret-token"
+
+# Arm Night (Somfy Partial)
+curl -X POST http://localhost:8582/arm/night \
+  -H "Authorization: Bearer your-secret-token"
+```
+
+| Endpoint | Somfy security level |
+|----------|----------------------|
+| `POST /disarm` | `disarmed` |
+| `POST /arm/away` | `armed` |
+| `POST /arm/night` | `partial` |
+
+**Successful response:**
+
+```json
 {
   "success": true,
-  "message": "Disarm command sent"
+  "message": "Away arm command sent"
 }
-\`\`\`
+```
 
 ### Security Considerations
 
-- **Always use httpToken** in production environments
-- The API only accepts connections from your local network
-- Consider using a firewall to restrict access to the API port
-- The token must be sent in the \`Authorization\` header as a Bearer token
+- **httpToken is mandatory whenever the HTTP API is enabled.** Requests without the correct token are rejected.
+- The server listens on **localhost only by default**. If you deliberately bind to `0.0.0.0`, use a firewall to restrict access to the API port.
+- The token must be sent in the `Authorization` header as a Bearer token
+- The API is disabled by default (`httpPort` unset or 0)
 
 ### Example: Virtual Switch Integration
 
 You can use this API with automation plugins like [homebridge-http-switch](https://github.com/Supereg/homebridge-http-switch) to create virtual switches that trigger disarm:
 
-\`\`\`json
+```json
 {
   "accessory": "HTTP-SWITCH",
   "name": "Disarm Alarm",
-  "onUrl": "http://localhost:8581/disarm",
+  "onUrl": "http://localhost:8582/disarm",
   "httpMethod": "POST",
   "headers": {
     "Authorization": "Bearer your-secret-token"
   }
 }
-\`\`\`
+```
 
 ## Supported Devices
 
@@ -205,29 +226,29 @@ If you see authentication errors:
 
 1. Verify your username and password are correct
 2. Try logging into the Somfy Protect mobile app to ensure your account is active
-3. Enable debug logging in config
+3. Enable Homebridge debug logging
 4. Check Homebridge logs for detailed error messages
 
 ### Clear Cached Token
 
 If you're having persistent authentication issues, you can clear the cached token:
 
-\`\`\`bash
+```bash
 rm ~/.homebridge/somfy-protect-token.json
-\`\`\`
+```
 
 Then restart Homebridge.
 
 ### Enable Debug Logging
 
-Set \`"debug": true\` in your config to see detailed API calls and responses.
+Start Homebridge with debug logging enabled (for example, `homebridge -D`) to see detailed API calls and responses.
 
 ## Improvements Over Original Plugin
 
-This is a complete rewrite of the original \`homebridge-somfy-protect\` plugin with significant improvements:
+This is a complete rewrite of the original `homebridge-somfy-protect` plugin with significant improvements:
 
 ### Reliability
-- ✅ Fixed token management bug (missing \`await\`)
+- ✅ Fixed token management bug (missing `await`)
 - ✅ Proper error handling with retry logic
 - ✅ Token persistence across restarts
 - ✅ Automatic token refresh
@@ -278,7 +299,6 @@ Future enhancements planned:
 - [ ] Battery level monitoring
 - [ ] Camera snapshot support
 - [ ] Webhook support (if API allows)
-- [ ] Adaptive polling (faster after changes)
 
 ---
 

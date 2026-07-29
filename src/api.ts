@@ -5,9 +5,9 @@ import { API_CONFIG, POLLING_CONFIG } from './settings.js';
 import { SomfyProtectAuth } from './auth.js';
 import {
   type Site,
-  type Device,
   type SecurityLevel,
   type SetSecurityLevelResponse,
+  isSecurityLevel,
   SomfyProtectApiError,
 } from './types.js';
 
@@ -29,7 +29,7 @@ export class SomfyProtectApi {
     // Create axios instance
     this.axios = axios.create({
       baseURL: API_CONFIG.BASE_URL,
-      timeout: 30000,
+      timeout: API_CONFIG.REQUEST_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Homebridge-Somfy-Protect',
@@ -43,9 +43,8 @@ export class SomfyProtectApi {
         return retryCount * POLLING_CONFIG.RETRY_DELAY;
       },
       retryCondition: (error) => {
-        // Retry on network errors and 5xx status codes
-        return axiosRetry.isNetworkOrIdempotentRequestError(error) ||
-               (error.response?.status ?? 0) >= 500;
+        // Never replay non-idempotent operations such as the panic POST.
+        return axiosRetry.isIdempotentRequestError(error);
       },
       onRetry: (retryCount, error) => {
         this.log.debug(`Retry attempt ${retryCount} after error:`, error.message);
@@ -74,17 +73,18 @@ export class SomfyProtectApi {
         if (axios.isAxiosError(error)) {
           const status = error.response?.status;
 
-          // Handle authentication errors
-          if (status === 401) {
+          // Handle authentication errors — retry once with a refreshed token.
+          // The _authRetried flag stops an infinite loop when the API keeps
+          // returning 401 even after a refresh.
+          const config = error.config as (typeof error.config & { _authRetried?: boolean }) | undefined;
+          if (status === 401 && config && !config._authRetried) {
             this.log.warn('Authentication error, attempting to refresh token');
             try {
               await this.auth.forceRefresh();
-              // Retry the original request
-              if (error.config) {
-                const token = await this.auth.getAccessToken();
-                error.config.headers.Authorization = `Bearer ${token}`;
-                return this.axios.request(error.config);
-              }
+              const token = await this.auth.getAccessToken();
+              config._authRetried = true;
+              config.headers.Authorization = `Bearer ${token}`;
+              return this.axios.request(config);
             } catch (refreshError) {
               this.log.error('Token refresh failed:', refreshError);
             }
@@ -108,8 +108,11 @@ export class SomfyProtectApi {
   async getSites(): Promise<Site[]> {
     try {
       this.log.debug('Fetching all sites');
-      const response = await this.axios.get<{ items: Site[] }>('/v3/site');
-      return response.data.items;
+      const response = await this.axios.get<{ items: unknown[] }>('/v3/site');
+      if (!Array.isArray(response.data.items)) {
+        throw new SomfyProtectApiError('Somfy API returned an invalid sites response');
+      }
+      return response.data.items.map(site => this.validateSite(site));
     } catch (error) {
       this.log.error('Failed to get sites:', error);
       throw error;
@@ -122,8 +125,8 @@ export class SomfyProtectApi {
   async getSite(siteId: string): Promise<Site> {
     try {
       this.log.debug(`Fetching site ${siteId}`);
-      const response = await this.axios.get<Site>(`/v3/site/${siteId}`);
-      return response.data;
+      const response = await this.axios.get<unknown>(`/v3/site/${siteId}`);
+      return this.validateSite(response.data);
     } catch (error) {
       this.log.error(`Failed to get site ${siteId}:`, error);
       throw error;
@@ -150,64 +153,29 @@ export class SomfyProtectApi {
     }
   }
 
-  /**
-   * Stop alarm
-   */
-  async stopAlarm(siteId: string): Promise<void> {
-    try {
-      this.log.info(`Stopping alarm for site ${siteId}`);
-      await this.axios.put(`/v3/site/${siteId}/alarm/stop`, {});
-    } catch (error) {
-      this.log.error(`Failed to stop alarm for site ${siteId}:`, error);
-      throw error;
+  private validateSite(site: unknown): Site {
+    if (!site || typeof site !== 'object') {
+      throw new SomfyProtectApiError('Somfy API returned an invalid site response');
     }
-  }
 
-  /**
-   * Trigger panic alarm
-   */
-  async triggerPanic(siteId: string, mode: 'silent' | 'alarm' = 'alarm'): Promise<void> {
-    try {
-      this.log.warn(`Triggering ${mode} panic for site ${siteId}`);
-      await this.axios.post(`/v3/site/${siteId}/panic`, { type: mode });
-    } catch (error) {
-      this.log.error(`Failed to trigger panic for site ${siteId}:`, error);
-      throw error;
+    const candidate = site as Partial<Record<keyof Site, unknown>>;
+    if (
+      typeof candidate.site_id !== 'string'
+      || typeof candidate.name !== 'string'
+      || typeof candidate.label !== 'string'
+      || typeof candidate.brand !== 'string'
+    ) {
+      throw new SomfyProtectApiError('Somfy API returned an invalid site response');
     }
-  }
 
-  /**
-   * Get all devices for a site
-   */
-  async getDevices(siteId: string): Promise<Device[]> {
-    try {
-      this.log.debug(`Fetching devices for site ${siteId}`);
-      const response = await this.axios.get<{ items: Device[] }>(`/v3/site/${siteId}/device`);
-      return response.data.items;
-    } catch (error) {
-      this.log.error(`Failed to get devices for site ${siteId}:`, error);
-      throw error;
+    const securityLevel = candidate.security_level;
+    if (!isSecurityLevel(securityLevel)) {
+      throw new SomfyProtectApiError(
+        `Somfy API returned unknown security level: ${String(securityLevel)}`,
+        undefined,
+        site,
+      );
     }
-  }
-
-  /**
-   * Get device by ID
-   */
-  async getDevice(siteId: string, deviceId: string): Promise<Device> {
-    try {
-      this.log.debug(`Fetching device ${deviceId} for site ${siteId}`);
-      const response = await this.axios.get<Device>(`/v3/site/${siteId}/device/${deviceId}`);
-      return response.data;
-    } catch (error) {
-      this.log.error(`Failed to get device ${deviceId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Clear cached authentication token (for troubleshooting)
-   */
-  clearAuthToken(): void {
-    this.auth.clearToken();
+    return site as Site;
   }
 }

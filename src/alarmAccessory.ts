@@ -3,6 +3,7 @@ import type { SomfyProtectPlatform } from './platform.js';
 import type { SomfyProtectApi } from './api.js';
 import type { Site, SecurityLevel } from './types.js';
 import { SomfyProtectApiError } from './types.js';
+import { PLUGIN_VERSION } from './settings.js';
 
 /**
  * Somfy Protect Alarm Accessory
@@ -11,7 +12,21 @@ import { SomfyProtectApiError } from './types.js';
 export class SomfyProtectAlarmAccessory {
   private service: Service;
   private isReachable = true;
-  private readonly STALENESS_THRESHOLD = 60000; // 60 seconds
+  private pendingTarget?: SecurityLevel;
+  // Kept so destroy() can remove the exact listener instance registered below
+  private readonly boundHandleSiteUpdate: (
+    siteId: string,
+    updatedSite: Site,
+    pendingTarget?: SecurityLevel,
+  ) => void;
+
+  /**
+   * Data older than this is considered stale. Derived from the polling
+   * interval so a slow (e.g. 60s+) poll doesn't trip false faults between polls.
+   */
+  private get stalenessThreshold(): number {
+    return Math.max(90000, this.platform.getNormalPollingInterval() * 2 + 30000);
+  }
 
   constructor(
     private readonly platform: SomfyProtectPlatform,
@@ -25,7 +40,7 @@ export class SomfyProtectAlarmAccessory {
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Somfy')
       .setCharacteristic(this.platform.Characteristic.Model, 'Somfy Protect')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, site.site_id)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.0')
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, PLUGIN_VERSION)
       .setCharacteristic(this.platform.Characteristic.Name, site.label);
 
     // Get or create Security System service
@@ -67,7 +82,8 @@ export class SomfyProtectAlarmAccessory {
       .onGet(this.getStatusFault.bind(this));
 
     // Listen for site updates from platform (EventEmitter pattern)
-    this.platform.events.on('siteUpdated', this.handleSiteUpdate.bind(this));
+    this.boundHandleSiteUpdate = this.handleSiteUpdate.bind(this);
+    this.platform.events.on('siteUpdated', this.boundHandleSiteUpdate);
 
     // Set initial state
     this.updateCharacteristics();
@@ -85,8 +101,7 @@ export class SomfyProtectAlarmAccessory {
     case 'disarmed':
       return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
     default:
-      this.platform.log.warn(`Unknown security level: ${level}`);
-      return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
+      throw new Error(`Unknown security level: ${String(level)}`);
     }
   }
 
@@ -102,8 +117,7 @@ export class SomfyProtectAlarmAccessory {
     case 'disarmed':
       return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
     default:
-      this.platform.log.warn(`Unknown security level: ${level}`);
-      return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
+      throw new Error(`Unknown security level: ${String(level)}`);
     }
   }
 
@@ -119,8 +133,7 @@ export class SomfyProtectAlarmAccessory {
     case this.platform.Characteristic.SecuritySystemTargetState.DISARM:
       return 'disarmed';
     default:
-      this.platform.log.warn(`Unknown target state: ${state}`);
-      return 'disarmed';
+      throw new Error(`Unknown target state: ${String(state)}`);
     }
   }
 
@@ -131,7 +144,7 @@ export class SomfyProtectAlarmAccessory {
     try {
       // Check if data is stale
       const lastUpdate = this.accessory.context.lastUpdate as number;
-      const isStale = !lastUpdate || (Date.now() - lastUpdate > this.STALENESS_THRESHOLD);
+      const isStale = !lastUpdate || (Date.now() - lastUpdate > this.stalenessThreshold);
 
       if (isStale) {
         this.isReachable = false;
@@ -165,8 +178,9 @@ export class SomfyProtectAlarmAccessory {
   async getTargetState(): Promise<CharacteristicValue> {
     try {
       const site = this.accessory.context.site as Site;
-      this.platform.log.debug(`Getting target state for ${site.label}: ${site.security_level}`);
-      return this.somfyToHomekitTargetState(site.security_level);
+      const targetLevel = this.pendingTarget || site.security_level;
+      this.platform.log.debug(`Getting target state for ${site.label}: ${targetLevel}`);
+      return this.somfyToHomekitTargetState(targetLevel);
     } catch (error) {
       this.platform.log.error('Error getting target state:', error);
       throw new this.platform.homebridgeApi.hap.HapStatusError(
@@ -188,14 +202,15 @@ export class SomfyProtectAlarmAccessory {
       // Send command to Somfy API
       await this.api.setSecurityLevel(site.site_id, targetLevel);
 
-      // Update local cache optimistically
-      site.security_level = targetLevel;
-      this.accessory.context.site = site;
+      // Keep the requested target separate from the last state observed remotely.
+      this.pendingTarget = targetLevel;
+      this.accessory.context.pendingTarget = targetLevel;
+      this.platform.requestFastPolling(site.site_id, targetLevel);
 
-      // Update current state characteristic to match
+      // HomeKit target changes immediately; current state changes only after polling confirms it.
       this.service.updateCharacteristic(
-        this.platform.Characteristic.SecuritySystemCurrentState,
-        this.somfyToHomekitCurrentState(targetLevel),
+        this.platform.Characteristic.SecuritySystemTargetState,
+        this.somfyToHomekitTargetState(targetLevel),
       );
 
       this.platform.log.info(`Successfully set ${site.label} to ${targetLevel}`);
@@ -207,7 +222,7 @@ export class SomfyProtectAlarmAccessory {
       const site = this.accessory.context.site as Site;
       this.service.updateCharacteristic(
         this.platform.Characteristic.SecuritySystemTargetState,
-        this.somfyToHomekitTargetState(site.security_level),
+        this.somfyToHomekitTargetState(this.pendingTarget || site.security_level),
       );
 
       throw new this.platform.homebridgeApi.hap.HapStatusError(
@@ -221,7 +236,7 @@ export class SomfyProtectAlarmAccessory {
    */
   async getStatusFault(): Promise<CharacteristicValue> {
     const lastUpdate = this.accessory.context.lastUpdate as number;
-    const isStale = !lastUpdate || (Date.now() - lastUpdate > this.STALENESS_THRESHOLD);
+    const isStale = !lastUpdate || (Date.now() - lastUpdate > this.stalenessThreshold);
 
     if (isStale || !this.isReachable) {
       return this.platform.Characteristic.StatusFault.GENERAL_FAULT;
@@ -233,16 +248,26 @@ export class SomfyProtectAlarmAccessory {
   /**
    * Handle site update event from platform (EventEmitter pattern)
    */
-  private handleSiteUpdate(siteId: string, updatedSite: Site): void {
+  private handleSiteUpdate(
+    siteId: string,
+    updatedSite: Site,
+    pendingTarget?: SecurityLevel,
+  ): void {
     const currentSite = this.accessory.context.site as Site;
 
     if (siteId === currentSite.site_id) {
       // Update context
       this.accessory.context.site = updatedSite;
       this.accessory.context.lastUpdate = Date.now();
+      this.pendingTarget = pendingTarget;
+      if (pendingTarget) {
+        this.accessory.context.pendingTarget = pendingTarget;
+      } else {
+        delete this.accessory.context.pendingTarget;
+      }
 
       // Update characteristics
-      this.updateCharacteristics();
+      this.updateCharacteristics(pendingTarget);
 
       // Update reachability
       this.isReachable = true;
@@ -256,11 +281,11 @@ export class SomfyProtectAlarmAccessory {
   /**
    * Update characteristics based on current site data
    */
-  private updateCharacteristics(): void {
+  private updateCharacteristics(targetOverride?: SecurityLevel): void {
     const site = this.accessory.context.site as Site;
 
     const currentState = this.somfyToHomekitCurrentState(site.security_level);
-    const targetState = this.somfyToHomekitTargetState(site.security_level);
+    const targetState = this.somfyToHomekitTargetState(targetOverride || site.security_level);
 
     this.service.updateCharacteristic(
       this.platform.Characteristic.SecuritySystemCurrentState,
@@ -307,7 +332,7 @@ export class SomfyProtectAlarmAccessory {
    */
   public destroy(): void {
     // Remove event listeners
-    this.platform.events.removeListener('siteUpdated', this.handleSiteUpdate.bind(this));
+    this.platform.events.removeListener('siteUpdated', this.boundHandleSiteUpdate);
     this.platform.log.debug('Cleaned up alarm accessory');
   }
 }

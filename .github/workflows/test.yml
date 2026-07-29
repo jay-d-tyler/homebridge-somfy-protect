@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, master, develop ]
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     name: Lint, Test & Build
@@ -13,14 +16,14 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20.x, 22.x]
+        node-version: [20.x, 22.x, 24.x]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -34,15 +37,11 @@ jobs:
       - name: Build project
         run: npm run build
 
-      - name: Run tests
-        run: npm test
-
-      - name: Generate coverage report
+      - name: Run tests with coverage
         run: npm run test:coverage
-        continue-on-error: true
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         if: matrix.node-version == '22.x'
         with:
           files: ./coverage/lcov.info
@@ -51,7 +50,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: matrix.node-version == '22.x'
         with:
           name: coverage-report
@@ -64,10 +63,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.x'
           cache: 'npm'
@@ -84,9 +83,9 @@ jobs:
       - name: Check index.js exists
         run: test -f dist/index.js
 
-      - name: Verify no TypeScript files in dist
+      - name: Verify no TypeScript source files in dist
         run: |
-          if find dist -name "*.ts" | grep -q .; then
-            echo "Error: TypeScript files found in dist/"
+          if find dist -type f -name "*.ts" ! -name "*.d.ts" | grep -q .; then
+            echo "Error: TypeScript source files found in dist/"
             exit 1
           fi
