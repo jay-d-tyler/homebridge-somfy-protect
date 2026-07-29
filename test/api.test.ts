@@ -177,6 +177,63 @@ describe('SomfyProtectApi', () => {
       expect(mockLogger.debug).toHaveBeenCalledWith('Fetching all sites');
     });
 
+    it('should accept the current Somfy site shape with an object brand', async () => {
+      const liveSite = {
+        site_id: 'site-1',
+        label: 'Home',
+        security_level: 'disarmed',
+        brand: {
+          brand_id: 'somfy_protect',
+        },
+      };
+
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: { items: [liveSite] },
+      });
+
+      await expect(api.getSites()).resolves.toEqual([liveSite]);
+    });
+
+    it('should use the site name when the optional label is absent', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          items: [{
+            site_id: 'site-1',
+            name: 'Home',
+            security_level: 'disarmed',
+          }],
+        },
+      });
+
+      await expect(api.getSites()).resolves.toEqual([
+        expect.objectContaining({
+          site_id: 'site-1',
+          label: 'Home',
+          security_level: 'disarmed',
+        }),
+      ]);
+    });
+
+    it('should generate a stable label when Somfy omits both display names', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          items: [{
+            site_id: 'site-123456789',
+            security_level: 'disarmed',
+          }],
+        },
+      });
+
+      await expect(api.getSites()).resolves.toEqual([
+        expect.objectContaining({
+          label: 'Somfy Protect (site-123)',
+        }),
+      ]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Somfy site site-123456789 has no label; using "Somfy Protect (site-123)"',
+      );
+    });
+
     it('should handle errors when fetching sites', async () => {
       mockAxiosInstance.get.mockRejectedValueOnce(new Error('Network error'));
 
@@ -245,6 +302,17 @@ describe('SomfyProtectApi', () => {
       });
 
       await expect(api.getSite('site-1')).rejects.toThrow('unknown security level');
+    });
+
+    it('should reject a site without an identifier', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: {
+          label: 'Home',
+          security_level: 'disarmed',
+        },
+      });
+
+      await expect(api.getSite('site-1')).rejects.toThrow('missing site_id');
     });
 
     it('should reject a malformed site object', async () => {

@@ -3,6 +3,7 @@ import type { SomfyProtectPlatform } from '../src/platform.js';
 import type { SomfyProtectApi } from '../src/api.js';
 import type { PlatformAccessory } from 'homebridge';
 import { SomfyProtectApiError } from '../src/types.js';
+import { PLUGIN_VERSION } from '../src/settings.js';
 import { EventEmitter } from 'events';
 
 describe('SomfyProtectAlarmAccessory', () => {
@@ -126,7 +127,7 @@ describe('SomfyProtectAlarmAccessory', () => {
       );
       expect(infoService?.setCharacteristic).toHaveBeenCalledWith(
         mockCharacteristic.FirmwareRevision,
-        '2.3.0',
+        PLUGIN_VERSION,
       );
     });
 

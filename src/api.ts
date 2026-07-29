@@ -159,13 +159,15 @@ export class SomfyProtectApi {
     }
 
     const candidate = site as Partial<Record<keyof Site, unknown>>;
-    if (
-      typeof candidate.site_id !== 'string'
-      || typeof candidate.name !== 'string'
-      || typeof candidate.label !== 'string'
-      || typeof candidate.brand !== 'string'
-    ) {
-      throw new SomfyProtectApiError('Somfy API returned an invalid site response');
+    const siteId = typeof candidate.site_id === 'string'
+      ? candidate.site_id.trim()
+      : '';
+    if (!siteId) {
+      throw new SomfyProtectApiError(
+        'Somfy API returned an invalid site response: missing site_id',
+        undefined,
+        site,
+      );
     }
 
     const securityLevel = candidate.security_level;
@@ -176,6 +178,26 @@ export class SomfyProtectApi {
         site,
       );
     }
-    return site as Site;
+
+    const label = this.getSiteLabel(candidate.label, candidate.name, siteId);
+    return {
+      ...(site as Record<string, unknown>),
+      site_id: siteId,
+      label,
+      security_level: securityLevel,
+    };
+  }
+
+  private getSiteLabel(label: unknown, name: unknown, siteId: string): string {
+    if (typeof label === 'string' && label.trim()) {
+      return label.trim();
+    }
+    if (typeof name === 'string' && name.trim()) {
+      return name.trim();
+    }
+
+    const fallback = `Somfy Protect (${siteId.slice(0, 8)})`;
+    this.log.warn(`Somfy site ${siteId} has no label; using "${fallback}"`);
+    return fallback;
   }
 }
