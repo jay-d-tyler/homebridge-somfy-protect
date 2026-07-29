@@ -31,13 +31,11 @@ export interface OAuthToken extends OAuthTokenResponse {
 
 export interface Site {
   site_id: string;
-  name: string;
   label: string;
-  brand: string;
   security_level: SecurityLevel;
-  diagnosis?: {
-    is_everything_ok: boolean;
-  };
+  name?: string;
+  brand?: unknown;
+  diagnosis?: unknown;
 }
 
 export type SecurityLevel = 'disarmed' | 'armed' | 'partial';
