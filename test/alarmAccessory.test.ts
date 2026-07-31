@@ -146,10 +146,17 @@ describe('SomfyProtectAlarmAccessory', () => {
     it('should set valid values for characteristics', () => {
       expect(mockService.setProps).toHaveBeenCalledWith({
         validValues: [
-          mockCharacteristic.SecuritySystemCurrentState.STAY_ARM,
+          mockCharacteristic.SecuritySystemCurrentState.NIGHT_ARM,
           mockCharacteristic.SecuritySystemCurrentState.AWAY_ARM,
           mockCharacteristic.SecuritySystemCurrentState.DISARMED,
           mockCharacteristic.SecuritySystemCurrentState.ALARM_TRIGGERED,
+        ],
+      });
+      expect(mockService.setProps).toHaveBeenCalledWith({
+        validValues: [
+          mockCharacteristic.SecuritySystemTargetState.NIGHT_ARM,
+          mockCharacteristic.SecuritySystemTargetState.AWAY_ARM,
+          mockCharacteristic.SecuritySystemTargetState.DISARM,
         ],
       });
     });
@@ -166,10 +173,10 @@ describe('SomfyProtectAlarmAccessory', () => {
       expect(state).toBe(mockCharacteristic.SecuritySystemCurrentState.AWAY_ARM);
     });
 
-    it('should convert partial to STAY_ARM', async () => {
+    it('should convert partial to NIGHT_ARM', async () => {
       mockAccessory.context.site.security_level = 'partial';
       const state = await accessory.getCurrentState();
-      expect(state).toBe(mockCharacteristic.SecuritySystemCurrentState.STAY_ARM);
+      expect(state).toBe(mockCharacteristic.SecuritySystemCurrentState.NIGHT_ARM);
     });
 
     it('should convert disarmed to DISARMED', async () => {
@@ -225,7 +232,7 @@ describe('SomfyProtectAlarmAccessory', () => {
 
       const state = await accessory.getTargetState();
 
-      expect(state).toBe(mockCharacteristic.SecuritySystemTargetState.STAY_ARM);
+      expect(state).toBe(mockCharacteristic.SecuritySystemTargetState.NIGHT_ARM);
     });
 
     it('should fail closed for an unknown target security level', async () => {
@@ -260,8 +267,8 @@ describe('SomfyProtectAlarmAccessory', () => {
       );
     });
 
-    it('should set target state to STAY_ARM', async () => {
-      const targetState = mockCharacteristic.SecuritySystemTargetState.STAY_ARM;
+    it('should set target state to NIGHT_ARM', async () => {
+      const targetState = mockCharacteristic.SecuritySystemTargetState.NIGHT_ARM;
 
       await accessory.setTargetState(targetState);
 
@@ -289,14 +296,14 @@ describe('SomfyProtectAlarmAccessory', () => {
     });
 
     it('should reject unsupported HomeKit states without disarming', async () => {
-      const unsupportedState = mockCharacteristic.SecuritySystemTargetState.NIGHT_ARM;
+      const unsupportedState = mockCharacteristic.SecuritySystemTargetState.STAY_ARM;
 
       await expect(accessory.setTargetState(unsupportedState)).rejects.toThrow();
 
       expect(mockApi.setSecurityLevel).not.toHaveBeenCalled();
       expect(mockPlatform.log.error).toHaveBeenCalledWith(
         'Error setting target state:',
-        'Unknown target state: 2',
+        'Unknown target state: 0',
       );
     });
   });

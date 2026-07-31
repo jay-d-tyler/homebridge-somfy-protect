@@ -53,7 +53,7 @@ export class SomfyProtectAlarmAccessory {
     this.service.getCharacteristic(this.platform.Characteristic.SecuritySystemCurrentState)
       .setProps({
         validValues: [
-          this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM,
+          this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM,
           this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM,
           this.platform.Characteristic.SecuritySystemCurrentState.DISARMED,
           this.platform.Characteristic.SecuritySystemCurrentState.ALARM_TRIGGERED,
@@ -63,7 +63,7 @@ export class SomfyProtectAlarmAccessory {
     this.service.getCharacteristic(this.platform.Characteristic.SecuritySystemTargetState)
       .setProps({
         validValues: [
-          this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM,
+          this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM,
           this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM,
           this.platform.Characteristic.SecuritySystemTargetState.DISARM,
         ],
@@ -97,7 +97,7 @@ export class SomfyProtectAlarmAccessory {
     case 'armed':
       return this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM;
     case 'partial':
-      return this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
+      return this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM;
     case 'disarmed':
       return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
     default:
@@ -113,7 +113,7 @@ export class SomfyProtectAlarmAccessory {
     case 'armed':
       return this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
     case 'partial':
-      return this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM;
+      return this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM;
     case 'disarmed':
       return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
     default:
@@ -128,7 +128,7 @@ export class SomfyProtectAlarmAccessory {
     switch (state) {
     case this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM:
       return 'armed';
-    case this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM:
+    case this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM:
       return 'partial';
     case this.platform.Characteristic.SecuritySystemTargetState.DISARM:
       return 'disarmed';

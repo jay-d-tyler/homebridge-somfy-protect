@@ -215,7 +215,7 @@ Currently, the plugin exposes:
 | Somfy Protect | HomeKit |
 |---------------|---------|
 | Armed | Away Arm |
-| Partial | Stay Arm |
+| Partial | Night Arm |
 | Disarmed | Disarmed |
 
 ## Troubleshooting
