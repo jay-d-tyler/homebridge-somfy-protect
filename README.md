@@ -103,7 +103,7 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
 | `name` | No | "Somfy Protect" | Name shown in Homebridge logs |
 | `username` | Yes | - | Your Somfy Protect account email |
 | `password` | Yes | - | Your Somfy Protect account password |
-| `siteId` | No | (first site) | Specific site ID if you have multiple homes |
+| `siteId` | No | All discovered sites | Select one site by its exact ID; when omitted or empty, all discovered sites are registered |
 | `pollingInterval` | No | 60000 | Normal status update interval in milliseconds (5000-300000) |
 | `adaptivePolling` | No | true | Poll faster right after a state change, then slow back down |
 | `fastPollingInterval` | No | 1000 | Poll interval after a state change in milliseconds (1000-10000) |
@@ -125,6 +125,12 @@ If you have multiple Somfy Protect sites (homes) on your account:
      - Vacation Home: xyz789-site-id
    ```
 4. Copy the site ID you want to use into your config
+
+With no `siteId`, discovery registers an alarm accessory for every returned
+site, not just the first. A non-empty `siteId` restricts registration to that
+exact match. If it is not found, discovery logs the available sites and returns
+without starting the HTTP API. When no sites are returned, discovery also
+returns before HTTP startup.
 
 ## HTTP API for Automation
 
@@ -151,7 +157,18 @@ Add `httpPort` to your configuration:
 
 ### Using the HTTP API
 
-Every endpoint requires the configured Bearer token.
+Every alarm-control POST requires the configured Bearer token. Each command
+applies to all registered alarm accessories; there is no per-request site
+selector. Configure `siteId` to restrict this platform to one site. An alarm is
+skipped only when its cached state already matches and that cache is fresh
+(within the greater of 90 seconds or twice the normal polling interval plus
+30 seconds).
+
+Commands for the remaining alarms run concurrently. A failure returns HTTP 500
+but does not roll back commands accepted by other sites. HTTP 200 means the
+commands were accepted (or skipped as already matching), not that polling has
+confirmed every physical alarm state. Successful commands request subsequent
+status confirmation.
 
 ```bash
 # Disarm all alarms
