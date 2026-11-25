@@ -2,7 +2,7 @@
   "name": "@jay-d-tyler/homebridge-somfy-protect",
   "displayName": "Somfy Protect",
   "type": "module",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "private": false,
   "description": "Modern Homebridge plugin to integrate Somfy Protect home security system with HomeKit.",
   "author": "Jay",
@@ -31,7 +31,7 @@
     "README.md"
   ],
   "engines": {
-    "node": "^20.18.0 || ^22.10.0 || ^24.0.0",
+    "node": ">=20.18.0",
     "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
   "scripts": {
