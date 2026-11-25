@@ -7,6 +7,7 @@ import {
   type Site,
   type SecurityLevel,
   type SetSecurityLevelResponse,
+  type SomfyProtectCredentials,
   isSecurityLevel,
   SomfyProtectApiError,
 } from './types.js';
@@ -20,11 +21,10 @@ export class SomfyProtectApi {
 
   constructor(
     private readonly log: Logging,
-    username: string,
-    password: string,
+    credentials: SomfyProtectCredentials,
     storagePath: string,
   ) {
-    this.auth = new SomfyProtectAuth(log, username, password, storagePath);
+    this.auth = new SomfyProtectAuth(log, credentials, storagePath);
 
     // Create axios instance
     this.axios = axios.create({

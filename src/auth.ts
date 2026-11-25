@@ -6,6 +6,7 @@ import { API_CONFIG } from './settings.js';
 import {
   type OAuthToken,
   type OAuthTokenResponse,
+  type SomfyProtectCredentials,
   SomfyProtectApiError,
 } from './types.js';
 
@@ -26,8 +27,7 @@ export class SomfyProtectAuth {
 
   constructor(
     private readonly log: Logging,
-    private readonly username: string,
-    private readonly password: string,
+    private readonly credentials: SomfyProtectCredentials,
     storagePath: string,
   ) {
     this.tokenPath = path.join(storagePath, 'somfy-protect-token.json');
@@ -100,7 +100,7 @@ export class SomfyProtectAuth {
   }
 
   private get normalizedUsername(): string {
-    return this.username.trim().toLowerCase();
+    return this.credentials.username.trim().toLowerCase();
   }
 
   private isStoredToken(value: unknown): value is StoredOAuthToken {
@@ -173,10 +173,10 @@ export class SomfyProtectAuth {
     try {
       const params = new URLSearchParams({
         grant_type: 'password',
-        client_id: API_CONFIG.CLIENT_ID,
-        client_secret: API_CONFIG.CLIENT_SECRET,
-        username: this.username,
-        password: this.password,
+        client_id: this.credentials.oauthClientId,
+        client_secret: this.credentials.oauthClientSecret,
+        username: this.credentials.username,
+        password: this.credentials.password,
       });
 
       const response = await this.axios.post<OAuthTokenResponse>('', params.toString());
@@ -189,13 +189,11 @@ export class SomfyProtectAuth {
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
-        const message = error.response?.data?.error_description || error.message;
-        this.log.error('Authentication failed:', message);
-        throw new SomfyProtectApiError(
-          `Authentication failed: ${message}`,
-          status,
-          error.response?.data,
-        );
+        const message = status
+          ? `Authentication failed (HTTP ${status})`
+          : 'Authentication failed while contacting the Somfy Protect token endpoint';
+        this.log.error(message);
+        throw new SomfyProtectApiError(message, status);
       }
       throw error;
     }
@@ -214,8 +212,8 @@ export class SomfyProtectAuth {
     try {
       const params = new URLSearchParams({
         grant_type: 'refresh_token',
-        client_id: API_CONFIG.CLIENT_ID,
-        client_secret: API_CONFIG.CLIENT_SECRET,
+        client_id: this.credentials.oauthClientId,
+        client_secret: this.credentials.oauthClientSecret,
         refresh_token: this.token.refresh_token,
       });
 
@@ -235,12 +233,10 @@ export class SomfyProtectAuth {
           this.log.warn('Token refresh failed, requesting new token');
           return this.requestNewToken();
         }
-        const message = error.response?.data?.error_description || error.message;
-        throw new SomfyProtectApiError(
-          `Token refresh failed: ${message}`,
-          status,
-          error.response?.data,
-        );
+        const message = status
+          ? `Token refresh failed (HTTP ${status})`
+          : 'Token refresh failed while contacting the Somfy Protect token endpoint';
+        throw new SomfyProtectApiError(message, status);
       }
       throw error;
     }

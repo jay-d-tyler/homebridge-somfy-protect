@@ -44,7 +44,7 @@ Modern Homebridge plugin to integrate Somfy Protect home security systems with A
 
 1. Search for "Somfy Protect" in the Plugins tab
 2. Click **Install**
-3. Configure your credentials
+3. Enter your Somfy Protect account and OAuth client credentials
 4. Restart Homebridge
 
 ### Manual Installation
@@ -55,7 +55,15 @@ npm install -g @jay-d-tyler/homebridge-somfy-protect
 
 ## Configuration
 
-Configure the plugin through the Homebridge Config UI X interface, or manually edit your `config.json`:
+Configure the plugin through Homebridge Config UI X or by editing `config.json`.
+You need the client ID and secret for an OAuth client authorized for the
+Somfy Protect API and its password grant. Enter them as **OAuth Client ID**
+and **OAuth Client Secret** alongside your Somfy Protect email and password.
+
+When upgrading from 2.3.2 or earlier, add both OAuth fields before restarting
+Homebridge. Site discovery and the optional HTTP API start only once all four
+authentication fields are configured. Keep the settings and any Homebridge
+backups that contain them private.
 
 ### Minimum Configuration
 
@@ -66,7 +74,9 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
       "platform": "SomfyProtect",
       "name": "Somfy Protect",
       "username": "your.email@example.com",
-      "password": "your-password"
+      "password": "your-password",
+      "oauthClientId": "your-oauth-client-id",
+      "oauthClientSecret": "your-oauth-client-secret"
     }
   ]
 }
@@ -82,6 +92,8 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
       "name": "Somfy Protect",
       "username": "your.email@example.com",
       "password": "your-password",
+      "oauthClientId": "your-oauth-client-id",
+      "oauthClientSecret": "your-oauth-client-secret",
       "siteId": "your-site-id-if-multiple-sites",
       "pollingInterval": 60000,
       "adaptivePolling": true,
@@ -103,6 +115,8 @@ Configure the plugin through the Homebridge Config UI X interface, or manually e
 | `name` | No | "Somfy Protect" | Name shown in Homebridge logs |
 | `username` | Yes | - | Your Somfy Protect account email |
 | `password` | Yes | - | Your Somfy Protect account password |
+| `oauthClientId` | Yes | - | Your authorized Somfy Protect OAuth client ID |
+| `oauthClientSecret` | Yes | - | Your Somfy Protect OAuth client secret |
 | `siteId` | No | All discovered sites | Select one site by its exact ID; when omitted or empty, all discovered sites are registered |
 | `pollingInterval` | No | 60000 | Normal status update interval in milliseconds (5000-300000) |
 | `adaptivePolling` | No | true | Poll faster right after a state change, then slow back down |
@@ -145,6 +159,8 @@ Add `httpPort` to your configuration:
   "platform": "SomfyProtect",
   "username": "your.email@example.com",
   "password": "your-password",
+  "oauthClientId": "your-oauth-client-id",
+  "oauthClientSecret": "your-oauth-client-secret",
   "httpPort": 8582,
   "httpToken": "your-secret-token",
   "httpHost": "127.0.0.1"
@@ -241,7 +257,7 @@ Currently, the plugin exposes:
 
 If you see authentication errors:
 
-1. Verify your username and password are correct
+1. Verify your account email, password, OAuth client ID, and OAuth client secret
 2. Try logging into the Somfy Protect mobile app to ensure your account is active
 3. Enable Homebridge debug logging
 4. Check Homebridge logs for detailed error messages
@@ -291,7 +307,8 @@ This is a complete rewrite of the original `homebridge-somfy-protect` plugin wit
 
 ## API Information
 
-This plugin uses the unofficial Somfy Protect API (formerly MyFox). The API endpoints and OAuth credentials are reverse-engineered from the official mobile app.
+This plugin uses the unofficial Somfy Protect API (formerly MyFox). OAuth client
+credentials are supplied in the plugin settings.
 
 **Note**: Since this is an unofficial API, Somfy could change or revoke access at any time.
 

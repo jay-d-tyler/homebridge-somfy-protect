@@ -70,6 +70,16 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
       return;
     }
 
+    if (
+      typeof this.config.oauthClientId !== 'string'
+      || !this.config.oauthClientId.trim()
+      || typeof this.config.oauthClientSecret !== 'string'
+      || !this.config.oauthClientSecret.trim()
+    ) {
+      this.log.error('OAuth Client ID and OAuth Client Secret are required in the Somfy Protect plugin settings');
+      return;
+    }
+
     const configError = this.getConfigError();
     if (configError) {
       this.log.error(`Invalid Somfy Protect configuration: ${configError}`);
@@ -123,8 +133,12 @@ export class SomfyProtectPlatform implements DynamicPlatformPlugin {
       // Initialize API client
       this.api = new SomfyProtectApi(
         this.log,
-        this.config.username,
-        this.config.password,
+        {
+          username: this.config.username,
+          password: this.config.password,
+          oauthClientId: this.config.oauthClientId,
+          oauthClientSecret: this.config.oauthClientSecret,
+        },
         this.homebridgeApi.user.storagePath(),
       );
 

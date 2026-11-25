@@ -2,11 +2,16 @@
  * Somfy Protect API Types
  */
 
-export interface SomfyProtectConfig {
-  platform: string;
-  name?: string;
+export interface SomfyProtectCredentials {
   username: string;
   password: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+}
+
+export interface SomfyProtectConfig extends SomfyProtectCredentials {
+  platform: string;
+  name?: string;
   siteId?: string;
   pollingInterval?: number;
   adaptivePolling?: boolean;

@@ -67,7 +67,12 @@ describe('SomfyProtectApi', () => {
 
     (SomfyProtectAuth as jest.Mock).mockImplementation(() => mockAuth);
 
-    api = new SomfyProtectApi(mockLogger, 'test@example.com', 'password', '/storage');
+    api = new SomfyProtectApi(mockLogger, {
+      username: 'test@example.com',
+      password: 'password',
+      oauthClientId: 'test-client-id',
+      oauthClientSecret: 'test-client-secret',
+    }, '/storage');
   });
 
   describe('constructor', () => {

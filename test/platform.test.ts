@@ -101,6 +101,8 @@ describe('SomfyProtectPlatform', () => {
       name: 'Somfy Protect',
       username: 'test@example.com',
       password: 'test-password',
+      oauthClientId: 'test-client-id',
+      oauthClientSecret: 'test-client-secret',
     };
 
     // Mock Somfy API
@@ -159,6 +161,21 @@ describe('SomfyProtectPlatform', () => {
     });
 
     it.each([
+      ['oauthClientId', undefined],
+      ['oauthClientSecret', ' '],
+    ])('should skip startup when %s is missing', (key, value) => {
+      jest.mocked(mockApi.on).mockClear();
+      new SomfyProtectPlatform(mockLogger, { ...mockConfig, [key]: value }, mockApi);
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'OAuth Client ID and OAuth Client Secret are required in the Somfy Protect plugin settings',
+      );
+      expect(mockApi.on).not.toHaveBeenCalled();
+      expect(SomfyProtectApi).not.toHaveBeenCalled();
+      expect(HttpApiServer).not.toHaveBeenCalled();
+    });
+
+    it.each([
       ['pollingInterval', 1000],
       ['fastPollingInterval', 500],
       ['fastPollingDuration', 5000],
@@ -205,6 +222,12 @@ describe('SomfyProtectPlatform', () => {
     });
 
     it('should discover and register all sites', async () => {
+      expect(SomfyProtectApi).toHaveBeenCalledWith(mockLogger, {
+        username: mockConfig.username,
+        password: mockConfig.password,
+        oauthClientId: mockConfig.oauthClientId,
+        oauthClientSecret: mockConfig.oauthClientSecret,
+      }, '/mock/storage');
       expect(mockSomfyApi.getSites).toHaveBeenCalled();
       expect(mockApi.registerPlatformAccessories).toHaveBeenCalledTimes(2);
       expect(SomfyProtectAlarmAccessory).toHaveBeenCalledTimes(2);

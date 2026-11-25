@@ -6,7 +6,7 @@
   "footerDisplay": "💡 **Tip:** After saving, check your Homebridge logs to see detected sites. If you have multiple sites, copy the site ID and add it to Advanced Settings.",
   "schema": {
     "type": "object",
-    "required": ["username", "password"],
+    "required": ["username", "password", "oauthClientId", "oauthClientSecret"],
     "properties": {
       "name": {
         "title": "Name",
@@ -26,6 +26,21 @@
         "type": "string",
         "placeholder": "Enter your password",
         "description": "Your Somfy Protect account password",
+        "x-schema-form": {
+          "type": "password"
+        }
+      },
+      "oauthClientId": {
+        "title": "OAuth Client ID",
+        "type": "string",
+        "minLength": 1,
+        "description": "Client ID for an OAuth client authorized to use the Somfy Protect API."
+      },
+      "oauthClientSecret": {
+        "title": "OAuth Client Secret",
+        "type": "string",
+        "minLength": 1,
+        "description": "Secret for the configured Somfy Protect OAuth client.",
         "x-schema-form": {
           "type": "password"
         }
@@ -132,7 +147,7 @@
         {
           "type": "flex",
           "flex-flow": "column",
-          "items": ["username", "password"]
+          "items": ["username", "password", "oauthClientId", "oauthClientSecret"]
         }
       ]
     },

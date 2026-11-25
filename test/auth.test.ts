@@ -16,7 +16,12 @@ describe('SomfyProtectAuth', () => {
   let mockLogger: jest.Mocked<Logging>;
   const storagePath = '/test/storage';
   const username = 'test@example.com';
-  const password = 'test-password';
+  const credentials = {
+    username,
+    password: 'test-password',
+    oauthClientId: 'test-client+id',
+    oauthClientSecret: 'test-client&secret',
+  };
   const serializeStoredToken = (token: object, storedUsername = username) => JSON.stringify({
     version: 1,
     username: storedUsername,
@@ -50,7 +55,7 @@ describe('SomfyProtectAuth', () => {
     };
     mockedAxios.create = jest.fn().mockReturnValue(mockAxiosInstance);
 
-    auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+    auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
   });
 
   describe('constructor', () => {
@@ -89,10 +94,15 @@ describe('SomfyProtectAuth', () => {
       const token = await auth.getAccessToken();
 
       expect(token).toBe('test-access-token');
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
-        '',
-        expect.stringContaining('grant_type=password'),
-      );
+      const [requestPath, body] = mockAxiosInstance.post.mock.calls[0];
+      expect(requestPath).toBe('');
+      expect(Object.fromEntries(new URLSearchParams(body))).toEqual({
+        grant_type: 'password',
+        client_id: credentials.oauthClientId,
+        client_secret: credentials.oauthClientSecret,
+        username,
+        password: credentials.password,
+      });
       expect(mockLogger.info).toHaveBeenCalledWith(
         'Successfully authenticated with Somfy Protect',
       );
@@ -112,7 +122,7 @@ describe('SomfyProtectAuth', () => {
       mockedFs.readFileSync.mockReturnValue(serializeStoredToken(cachedToken));
 
       // Create new instance to trigger token loading
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       const token = await auth.getAccessToken();
 
@@ -146,15 +156,19 @@ describe('SomfyProtectAuth', () => {
       mockAxiosInstance.post.mockResolvedValueOnce({ data: newToken });
 
       // Create new instance to trigger token loading
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       const token = await auth.getAccessToken();
 
       expect(token).toBe('refreshed-token');
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
-        '',
-        expect.stringContaining('grant_type=refresh_token'),
-      );
+      const [requestPath, body] = mockAxiosInstance.post.mock.calls[0];
+      expect(requestPath).toBe('');
+      expect(Object.fromEntries(new URLSearchParams(body))).toEqual({
+        grant_type: 'refresh_token',
+        client_id: credentials.oauthClientId,
+        client_secret: credentials.oauthClientSecret,
+        refresh_token: expiredToken.refresh_token,
+      });
     });
 
     it('should handle authentication errors', async () => {
@@ -162,18 +176,19 @@ describe('SomfyProtectAuth', () => {
       mockAxiosInstance.post.mockRejectedValueOnce({
         response: {
           status: 401,
-          data: { error_description: 'Invalid credentials' },
+          data: { error_description: credentials.oauthClientSecret },
         },
         isAxiosError: true,
       });
 
       mockedFs.existsSync.mockReturnValue(false);
 
-      await expect(auth.getAccessToken()).rejects.toThrow('Authentication failed');
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Authentication failed:',
-        'Invalid credentials',
-      );
+      await expect(auth.getAccessToken()).rejects.toMatchObject({
+        message: 'Authentication failed (HTTP 401)',
+        statusCode: 401,
+        response: undefined,
+      });
+      expect(mockLogger.error.mock.calls).toEqual([['Authentication failed (HTTP 401)']]);
     });
 
     it('should request new token if refresh fails', async () => {
@@ -205,7 +220,7 @@ describe('SomfyProtectAuth', () => {
         })
         .mockResolvedValueOnce({ data: newToken }); // New token succeeds
 
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       const token = await auth.getAccessToken();
 
@@ -237,7 +252,7 @@ describe('SomfyProtectAuth', () => {
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post.mockResolvedValueOnce({ data: newToken });
 
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       await expect(auth.getAccessToken()).resolves.toBe('correct-account-token');
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
@@ -271,7 +286,7 @@ describe('SomfyProtectAuth', () => {
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post.mockResolvedValueOnce({ data: newToken });
 
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       await expect(auth.getAccessToken()).resolves.toBe('new-token');
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -342,7 +357,7 @@ describe('SomfyProtectAuth', () => {
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post.mockResolvedValueOnce({ data: refreshedToken });
 
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       await auth.forceRefresh();
 
@@ -372,7 +387,7 @@ describe('SomfyProtectAuth', () => {
       mockedFs.readFileSync.mockReturnValue(serializeStoredToken(currentToken));
       const mockAxiosInstance = (mockedAxios.create as jest.Mock).mock.results[0].value;
       mockAxiosInstance.post.mockResolvedValueOnce({ data: refreshedToken });
-      auth = new SomfyProtectAuth(mockLogger, username, password, storagePath);
+      auth = new SomfyProtectAuth(mockLogger, credentials, storagePath);
 
       await auth.forceRefresh();
 
